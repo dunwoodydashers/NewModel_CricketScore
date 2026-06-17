@@ -31,7 +31,7 @@ choice = st.sidebar.selectbox("Menu", menu)
 
 if choice == "Schedule & Rosters":
     c1, c2 = st.columns(2)
-   with c1:
+    with c1:
         st.subheader("Manage Teams")
         t_name = st.text_input("New Team Name")
         if st.button("Add Team"): 
