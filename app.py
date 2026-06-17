@@ -138,10 +138,10 @@ elif choice == "Live Scoring":
                 run_query("UPDATE matches SET toss_winner=?, toss_decision=?, status='Live' WHERE id=?", 
                           (winner, decision, match_id), commit=True)
                 st.rerun()
-                
-        else:
+       else:
             # Determine Batting and Bowling Teams based on Toss
-            if (toss_winner == team_a and decision == "Bat") or (toss_winner == team_b and decision == "Bowl"):
+            # FIX: Changed 'decision' to 'toss_decision'
+            if (toss_winner == team_a and toss_decision == "Bat") or (toss_winner == team_b and toss_decision == "Bowl"):
                 batting_team, bowling_team = team_a, team_b
             else:
                 batting_team, bowling_team = team_b, team_a
@@ -159,9 +159,10 @@ elif choice == "Live Scoring":
                 if 'innings_started' not in st.session_state or st.session_state.get('current_match_id') != match_id:
                     st.markdown("---")
                     st.subheader("🏏 Select Opening Players")
-                    st.write(f"**Toss:** {toss_winner} won the toss and elected to {decision.lower()} first.")
+                    # FIX: Changed 'decision' to 'toss_decision'
+                    st.write(f"**Toss:** {toss_winner} won the toss and elected to {toss_decision.lower()} first.")
                     
-                    c1, c2, c3 = st.columns(3)
+                    c1, c2, c3 = st.columns(3)         
                     with c1:
                         striker = st.selectbox("Striker", batting_squad)
                     with c2:
