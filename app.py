@@ -2,23 +2,27 @@ import streamlit as st
 import json
 from sqlalchemy import text
 
+# --- DATABASE SETUP ---
+# No more init_db() here; the SQL Editor handles the schema!
 conn = st.connection("supabase", type="sql")
 
 st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
 st.title("🏏 Pro Cricket Scoring System")
 
-# Helper to get teams - this will now work because RLS is disabled
+# --- HELPER FUNCTIONS ---
 def get_teams():
     try:
+        # Fetch current teams
         result = conn.session.execute(text("SELECT name FROM teams")).fetchall()
         return [r[0] for r in result]
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error fetching teams: {e}")
         return []
 
 menu = ["Schedule & Rosters", "Live Scoring", "Match History"]
 choice = st.sidebar.selectbox("Menu", menu)
 
+# --- PAGE 1: SCHEDULE & ROSTERS ---
 if choice == "Schedule & Rosters":
     c1, c2 = st.columns(2)
     with c1:
@@ -36,7 +40,8 @@ if choice == "Schedule & Rosters":
         p_name = st.text_input("Player Name")
         if st.button("Add Player"): 
             conn.session.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
-            conn.session.commit(); st.rerun()
+            conn.session.commit()
+            st.rerun()
             
     with c2:
         st.subheader("Schedule Match")
@@ -47,10 +52,12 @@ if choice == "Schedule & Rosters":
         if st.button("Schedule Match"): 
             conn.session.execute(text("INSERT INTO matches (team_a, team_b, date, status) VALUES (:a, :b, :d, 'Scheduled')"), 
                                  {"a": ta, "b": tb, "d": m_date})
-            conn.session.commit(); st.success("Match Scheduled!"); st.rerun()
+            conn.session.commit()
+            st.success("Match Scheduled!"); st.rerun()
 
+# --- PAGE 2: LIVE SCORING ---
 elif choice == "Live Scoring":
-    # Use raw SQL to fetch, as Streamlit's conn.query can be tricky with types
+    # Get all active matches
     with conn.session as s:
         matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
     
