@@ -2,25 +2,25 @@ import streamlit as st
 import json
 from sqlalchemy import text
 
-# --- DATABASE SETUP ---
 conn = st.connection("supabase", type="sql")
 
 st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
 st.title("🏏 Pro Cricket Scoring System")
 
-# --- HELPER FUNCTIONS ---
+# Helper to get teams
 def get_teams():
-    # Force a fresh fetch from the DB
     try:
-        data = conn.session.execute(text("SELECT name FROM teams")).fetchall()
-        return [r[0] for r in data]
-    except:
+        # We use a simple select. If RLS is ON, this might return empty.
+        result = conn.session.execute(text("SELECT name FROM teams")).fetchall()
+        return [r[0] for r in result]
+    except Exception as e:
+        st.error(f"Error fetching teams: {e}")
         return []
 
 menu = ["Schedule & Rosters", "Live Scoring", "Match History"]
 choice = st.sidebar.selectbox("Menu", menu)
 
-# --- PAGE 1 ---
+# --- PAGE 1: SCHEDULE & ROSTERS ---
 if choice == "Schedule & Rosters":
     c1, c2 = st.columns(2)
     with c1:
@@ -30,7 +30,6 @@ if choice == "Schedule & Rosters":
             if t_name:
                 conn.session.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name})
                 conn.session.commit()
-                st.success(f"Added {t_name}!")
                 st.rerun()
         
         teams = get_teams()
@@ -38,8 +37,7 @@ if choice == "Schedule & Rosters":
         p_name = st.text_input("Player Name")
         if st.button("Add Player"): 
             conn.session.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
-            conn.session.commit()
-            st.rerun()
+            conn.session.commit(); st.rerun()
             
     with c2:
         st.subheader("Schedule Match")
@@ -50,14 +48,12 @@ if choice == "Schedule & Rosters":
         if st.button("Schedule Match"): 
             conn.session.execute(text("INSERT INTO matches (team_a, team_b, date, status) VALUES (:a, :b, :d, 'Scheduled')"), 
                                  {"a": ta, "b": tb, "d": m_date})
-            conn.session.commit()
-            st.success("Match Scheduled!"); st.rerun()
+            conn.session.commit(); st.success("Match Scheduled!"); st.rerun()
 
-# --- PAGE 2 ---
+# --- PAGE 2: LIVE SCORING ---
 elif choice == "Live Scoring":
-    # Fetch all non-completed matches
     matches = conn.query("SELECT * FROM matches WHERE status != 'Completed'")
-    if matches.empty: st.info("No active matches. Go to Schedule tab."); st.stop()
+    if matches.empty: st.info("No active matches."); st.stop()
     
     m_list = matches.to_dict('records')
     m = st.selectbox("Select Match", m_list, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
@@ -75,6 +71,7 @@ elif choice == "Live Scoring":
         state = json.loads(m['score_state'])
         st.metric("Score", f"{state['runs']}/{state['wickets']}", f"Overs: {state['balls']//6}.{state['balls']%6}")
         
+        # Scoring logic
         c1, c2, c3 = st.columns(3)
         if c1.button("0 Run"): 
             state['balls'] += 1
