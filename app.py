@@ -5,37 +5,24 @@ from sqlalchemy import text
 # --- DATABASE SETUP ---
 conn = st.connection("supabase", type="sql")
 
-def init_db():
-    with conn.session as s:
-        s.execute(text('CREATE TABLE IF NOT EXISTS teams (id SERIAL PRIMARY KEY, name TEXT UNIQUE)'))
-        s.execute(text('CREATE TABLE IF NOT EXISTS players (id SERIAL PRIMARY KEY, team_name TEXT, name TEXT)'))
-        s.execute(text('''CREATE TABLE IF NOT EXISTS matches (
-            id SERIAL PRIMARY KEY, 
-            team_a TEXT, team_b TEXT, date DATE, 
-            status TEXT DEFAULT 'Scheduled', 
-            toss_winner TEXT, toss_decision TEXT, 
-            total_overs INTEGER DEFAULT 20
-        )'''))
-        try:
-            s.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS score_state JSONB DEFAULT '{\"runs\":0, \"wickets\":0, \"balls\":0, \"extras\":0}'::jsonb"))
-        except: pass
-        s.commit()
-
-init_db()
-
 # --- SCORING ENGINE ---
 def update_score(m_id, runs=0, wicket=False, extra=False):
     with conn.session as s:
+        # Fetch current state
         res = s.execute(text("SELECT score_state FROM matches WHERE id=:id"), {"id": m_id}).fetchone()
         state = json.loads(res[0])
+        
+        # Update state
         state['runs'] += runs
         if wicket: state['wickets'] += 1
         if not extra: state['balls'] += 1
         else: state['extras'] += runs
+        
+        # Save state
         s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m_id})
         s.commit()
 
-# --- UI ---
+# --- UI & NAVIGATION ---
 st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
 st.title("🏏 Pro Cricket Scoring System")
 
@@ -49,6 +36,7 @@ if choice == "Schedule & Rosters":
         t_name = st.text_input("New Team Name")
         if st.button("Add Team"): 
             conn.session.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name}); conn.session.commit(); st.rerun()
+        
         teams = [r[0] for r in conn.session.execute(text("SELECT name FROM teams"))]
         sel_t = st.selectbox("Select Team", teams)
         p_name = st.text_input("Player Name")
@@ -59,19 +47,13 @@ if choice == "Schedule & Rosters":
         ta, tb = st.selectbox("Team A", teams), st.selectbox("Team B", teams)
         m_date = st.date_input("Date")
         if st.button("Schedule Match"): 
-            # Force status as 'Scheduled'
-            conn.session.execute(text("INSERT INTO matches (team_a, team_b, date, status) VALUES (:a, :b, :d, 'Scheduled')"), 
-                                 {"a": ta, "b": tb, "d": m_date})
-            conn.session.commit(); st.success("Match Scheduled!"); st.rerun()
+            conn.session.execute(text("INSERT INTO matches (team_a, team_b, date, status) VALUES (:a, :b, :d, 'Scheduled')"), {"a": ta, "b": tb, "d": m_date}); conn.session.commit(); st.success("Match Scheduled!"); st.rerun()
 
 elif choice == "Live Scoring":
-    # Broad query to see all matches that are not completed
     matches = conn.query("SELECT * FROM matches WHERE status != 'Completed'")
-    if matches.empty: 
-        st.info("No active matches. Go to 'Schedule & Rosters' to create one.")
-        st.stop()
+    if matches.empty: st.info("No active matches. Schedule one first."); st.stop()
     
-    m = st.selectbox("Select Match", matches.to_dict('records'), format_func=lambda x: f"{x['team_a']} vs {x['team_b']} [{x['status']}]")
+    m = st.selectbox("Select Match", matches.to_dict('records'), format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
     
     if m['status'] == 'Scheduled':
         with st.form("toss_form"):
