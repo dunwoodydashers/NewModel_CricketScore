@@ -7,7 +7,6 @@ import json
 def init_db():
     conn = sqlite3.connect('database.db')
     c = conn.cursor()
-    # Create Tables if they don't exist
     c.execute('''CREATE TABLE IF NOT EXISTS teams (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)''')
     c.execute('''CREATE TABLE IF NOT EXISTS players (id INTEGER PRIMARY KEY AUTOINCREMENT, team_name TEXT, name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS matches (id INTEGER PRIMARY KEY AUTOINCREMENT, team_a TEXT, team_b TEXT, date TEXT, status TEXT, report TEXT)''')
@@ -15,7 +14,6 @@ def init_db():
     conn.close()
 
 def upgrade_db():
-    # Safely adds new columns for the Toss without deleting existing matches
     conn = sqlite3.connect('database.db')
     c = conn.cursor()
     try:
@@ -23,7 +21,7 @@ def upgrade_db():
         c.execute("ALTER TABLE matches ADD COLUMN toss_decision TEXT")
         conn.commit()
     except Exception:
-        pass # Columns already exist, move on
+        pass 
     conn.close()
 
 init_db()
@@ -122,7 +120,6 @@ elif choice == "Live Scoring":
     if not scheduled_matches:
         st.info("No active or scheduled matches found.")
     else:
-        # Match Selection Dropdown
         match_options = {f"{row[1]} vs {row[2]} ({row[3]})": row for row in scheduled_matches}
         selected_match_str = st.selectbox("Select Match to Score", list(match_options.keys()))
         match_data = match_options[selected_match_str]
@@ -159,5 +156,118 @@ elif choice == "Live Scoring":
             if len(batting_squad) < 2 or len(bowling_squad) < 1:
                 st.error(f"⚠️ Missing players! {batting_team} needs at least 2 players, and {bowling_team} needs at least 1. Go to Roster Management.")
             else:
-                
                 # ==========================================
+                # STEP 2: SELECT OPENERS
+                # ==========================================
+                if 'innings_started' not in st.session_state or st.session_state.get('current_match_id') != match_id:
+                    st.markdown("---")
+                    st.subheader("🏏 Select Opening Players")
+                    st.write(f"**Toss:** {toss_winner} won the toss and elected to {toss_decision.lower()} first.")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        striker = st.selectbox("Striker", batting_squad)
+                    with c2:
+                        non_striker = st.selectbox("Non-Striker", batting_squad, index=1 if len(batting_squad)>1 else 0)
+                    with c3:
+                        bowler = st.selectbox("Opening Bowler", bowling_squad)
+                        
+                    if st.button("Start Innings", type="primary", use_container_width=True):
+                        if striker == non_striker:
+                            st.error("Striker and Non-Striker cannot be the same person!")
+                        else:
+                            st.session_state.current_match_id = match_id
+                            st.session_state.innings_started = True
+                            st.session_state.runs = 0
+                            st.session_state.wickets = 0
+                            st.session_state.balls = 0
+                            st.session_state.striker = striker
+                            st.session_state.non_striker = non_striker
+                            st.session_state.bowler = bowler
+                            st.rerun()
+
+                # ==========================================
+                # STEP 3: LIVE SCORING BOARD
+                # ==========================================
+                else:
+                    st.markdown("---")
+                    overs = f"{st.session_state.balls // 6}.{st.session_state.balls % 6}"
+                    st.metric(label=f"{batting_team} Innings", value=f"{st.session_state.runs} / {st.session_state.wickets}", delta=f"Overs: {overs}")
+                    st.info(f"🏏 **Striker:** {st.session_state.striker}  |  👤 **Non-Striker:** {st.session_state.non_striker}  |  ⚾ **Bowler:** {st.session_state.bowler}")
+                    
+                    with st.expander("🔄 Change Batsman or Bowler"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            new_striker = st.selectbox("New Striker", batting_squad, index=batting_squad.index(st.session_state.striker))
+                            new_non_striker = st.selectbox("New Non-Striker", batting_squad, index=batting_squad.index(st.session_state.non_striker))
+                            if st.button("Update Batsmen"):
+                                st.session_state.striker = new_striker
+                                st.session_state.non_striker = new_non_striker
+                                st.rerun()
+                        with col2:
+                            new_bowler = st.selectbox("New Bowler", bowling_squad, index=bowling_squad.index(st.session_state.bowler))
+                            if st.button("Update Bowler"):
+                                st.session_state.bowler = new_bowler
+                                st.rerun()
+
+                    st.subheader("Score this ball")
+                    c1, c2, c3, c4, c5, c6 = st.columns(6)
+                    
+                    def add_ball(runs_scored, is_extra=False, wicket=False):
+                        if not is_extra:
+                            st.session_state.balls += 1
+                        st.session_state.runs += runs_scored
+                        if wicket:
+                            st.session_state.wickets += 1
+                        
+                        if runs_scored in [1, 3]:
+                            st.session_state.striker, st.session_state.non_striker = st.session_state.non_striker, st.session_state.striker
+                            
+                        if st.session_state.balls > 0 and st.session_state.balls % 6 == 0 and not is_extra:
+                            st.session_state.striker, st.session_state.non_striker = st.session_state.non_striker, st.session_state.striker
+                            st.toast("End of over! Please change the bowler using the dropdown above.", icon="🔄")
+
+                    if c1.button("0 Run"): add_ball(0)
+                    if c2.button("1 Run"): add_ball(1)
+                    if c3.button("2 Runs"): add_ball(2)
+                    if c4.button("4 Runs"): add_ball(4)
+                    if c5.button("6 Runs"): add_ball(6)
+                    if c6.button("🔴 Wicket", type="primary"): add_ball(0, wicket=True)
+                    
+                    st.write("---")
+                    
+                    if st.button("End Match & Save Report"):
+                        report_data = {
+                            "toss": f"{toss_winner} elected to {toss_decision.lower()}",
+                            "total_runs": st.session_state.runs,
+                            "total_wickets": st.session_state.wickets,
+                            "overs_played": overs,
+                            "date_completed": str(datetime.now().strftime("%Y-%m-%d %H:%M"))
+                        }
+                        report_json = json.dumps(report_data)
+                        run_query("UPDATE matches SET status = 'Completed', report = ? WHERE id = ?", (report_json, match_id), commit=True)
+                        
+                        keys_to_clear = ['innings_started', 'current_match_id', 'runs', 'wickets', 'balls', 'striker', 'non_striker', 'bowler']
+                        for key in keys_to_clear:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                                
+                        st.success("Match finalized! Report compiled and archived.")
+                        st.rerun()
+
+# ----------------------------------------------------
+# PAGE 4: MATCH HISTORY
+# ----------------------------------------------------
+elif choice == "Match History":
+    st.header("Archived Match Reports")
+    completed_matches = run_query("SELECT team_a, team_b, date, report FROM matches WHERE status = 'Completed'")
+    
+    if not completed_matches:
+        st.info("No historical records found yet.")
+    else:
+        for row in completed_matches:
+            t_a, t_b, m_date, raw_report = row[0], row[1], row[2], row[3]
+            report = json.loads(raw_report)
+            with st.expander(f"📋 {t_a} vs {t_b} — {m_date}"):
+                st.write(f"**Toss:** {report.get('toss', 'Data unavailable')}")
+                st.write(f"**Final Score:** **{report['total_runs']}/{report['total_wickets']}** in **{report['overs_played']}** overs.")
