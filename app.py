@@ -31,17 +31,20 @@ choice = st.sidebar.selectbox("Menu", menu)
 
 if choice == "Schedule & Rosters":
     c1, c2 = st.columns(2)
-    with c1:
+   with c1:
         st.subheader("Manage Teams")
         t_name = st.text_input("New Team Name")
         if st.button("Add Team"): 
-            conn.session.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name}); conn.session.commit(); st.rerun()
-        
-        teams = [r[0] for r in conn.session.execute(text("SELECT name FROM teams"))]
-        sel_t = st.selectbox("Select Team", teams)
-        p_name = st.text_input("Player Name")
-        if st.button("Add Player"): 
-            conn.session.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name}); conn.session.commit(); st.rerun()
+            if t_name:
+                try:
+                    conn.session.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name})
+                    conn.session.commit()
+                    st.success(f"Added {t_name}!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Database error: {e}")
+            else:
+                st.warning("Please enter a team name.")
     with c2:
         st.subheader("Schedule Match")
         ta, tb = st.selectbox("Team A", teams), st.selectbox("Team B", teams)
