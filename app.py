@@ -1,6 +1,5 @@
 import streamlit as st
 from datetime import datetime
-import json
 from sqlalchemy import text
 
 # --- DATABASE SETUP ---
@@ -8,9 +7,10 @@ conn = st.connection("supabase", type="sql")
 
 def init_db():
     with conn.session as s:
+        # Added date column back to the matches table
         s.execute(text('''CREATE TABLE IF NOT EXISTS teams (id SERIAL PRIMARY KEY, name TEXT UNIQUE)'''))
         s.execute(text('''CREATE TABLE IF NOT EXISTS players (id SERIAL PRIMARY KEY, team_name TEXT, name TEXT)'''))
-        s.execute(text('''CREATE TABLE IF NOT EXISTS matches (id SERIAL PRIMARY KEY, team_a TEXT, team_b TEXT, date TEXT, status TEXT, toss_winner TEXT, toss_decision TEXT)'''))
+        s.execute(text('''CREATE TABLE IF NOT EXISTS matches (id SERIAL PRIMARY KEY, team_a TEXT, team_b TEXT, date DATE, status TEXT, toss_winner TEXT, toss_decision TEXT)'''))
         s.commit()
 
 init_db()
@@ -38,7 +38,7 @@ if choice == "Schedule & Rosters":
             st.rerun()
         
         teams = [r[0] for r in run_query("SELECT name FROM teams")]
-        sel_team = st.selectbox("Select Team for Roster", teams)
+        sel_team = st.selectbox("Select Team", teams)
         p_name = st.text_input("Player Name")
         if st.button("Add Player"):
             run_query("INSERT INTO players (team_name, name) VALUES (:t, :p)", {"t": sel_team, "p": p_name}, commit=True)
@@ -49,35 +49,28 @@ if choice == "Schedule & Rosters":
         teams = [r[0] for r in run_query("SELECT name FROM teams")]
         ta = st.selectbox("Team A", teams)
         tb = st.selectbox("Team B", teams)
+        match_date = st.date_input("Match Date") # Restored Date Picker
         if st.button("Schedule Match"):
-            run_query("INSERT INTO matches (team_a, team_b, status) VALUES (:a, :b, 'Scheduled')", {"a": ta, "b": tb}, commit=True)
-            st.success("Match Scheduled!")
+            run_query("INSERT INTO matches (team_a, team_b, date, status) VALUES (:a, :b, :d, 'Scheduled')", 
+                      {"a": ta, "b": tb, "d": match_date}, commit=True)
+            st.success(f"Match scheduled for {match_date}!")
+            st.rerun()
 
 # --- PAGE 2: LIVE SCORING ---
 elif choice == "Live Scoring":
-    matches = run_query("SELECT id, team_a, team_b, toss_winner FROM matches WHERE status != 'Completed'")
+    matches = run_query("SELECT id, team_a, team_b, date FROM matches WHERE status != 'Completed'")
     if not matches: st.info("No active matches found."); st.stop()
     
-    match = st.selectbox("Select Match", matches, format_func=lambda x: f"{x[1]} vs {x[2]}")
+    match = st.selectbox("Select Match", matches, format_func=lambda x: f"{x[1]} vs {x[2]} ({x[3]})")
     m_id = match[0]
     
-    if not match[3]: # No toss yet
-        st.subheader("The Toss")
-        winner = st.radio("Winner", [match[1], match[2]])
-        decision = st.radio("Decision", ["Bat", "Bowl"])
-        if st.button("Confirm Toss"):
-            run_query("UPDATE matches SET toss_winner=:tw, toss_decision=:td, status='Live' WHERE id=:id", 
-                      {"tw": winner, "td": decision, "id": m_id}, commit=True)
-            st.rerun()
-    else:
-        st.success(f"Match Active: {match[1]} vs {match[2]}")
-        # Scoring logic here...
-        if st.button("End Match"):
-            run_query("UPDATE matches SET status='Completed' WHERE id=:id", {"id": m_id}, commit=True)
-            st.rerun()
+    st.write(f"Scoring: {match[1]} vs {match[2]}")
+    if st.button("End Match"):
+        run_query("UPDATE matches SET status='Completed' WHERE id=:id", {"id": m_id}, commit=True)
+        st.rerun()
 
 # --- PAGE 3: HISTORY ---
 elif choice == "Match History":
-    history = run_query("SELECT team_a, team_b FROM matches WHERE status = 'Completed'")
+    history = run_query("SELECT team_a, team_b, date FROM matches WHERE status = 'Completed'")
     for h in history:
-        st.write(f"✅ {h[0]} vs {h[1]}")
+        st.write(f"✅ {h[0]} vs {h[1]} on {h[2]}")
