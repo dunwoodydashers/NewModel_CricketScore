@@ -7,20 +7,18 @@ conn = st.connection("supabase", type="sql")
 st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
 st.title("🏏 Pro Cricket Scoring System")
 
-# Helper to get teams
+# Helper to get teams - this will now work because RLS is disabled
 def get_teams():
     try:
-        # We use a simple select. If RLS is ON, this might return empty.
         result = conn.session.execute(text("SELECT name FROM teams")).fetchall()
         return [r[0] for r in result]
     except Exception as e:
-        st.error(f"Error fetching teams: {e}")
+        st.error(f"Error: {e}")
         return []
 
 menu = ["Schedule & Rosters", "Live Scoring", "Match History"]
 choice = st.sidebar.selectbox("Menu", menu)
 
-# --- PAGE 1: SCHEDULE & ROSTERS ---
 if choice == "Schedule & Rosters":
     c1, c2 = st.columns(2)
     with c1:
@@ -30,10 +28,11 @@ if choice == "Schedule & Rosters":
             if t_name:
                 conn.session.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name})
                 conn.session.commit()
+                st.success(f"Added {t_name}!")
                 st.rerun()
         
         teams = get_teams()
-        sel_t = st.selectbox("Select Team for Player", teams if teams else ["No teams available"])
+        sel_t = st.selectbox("Select Team for Player", teams if teams else ["Add a team first"])
         p_name = st.text_input("Player Name")
         if st.button("Add Player"): 
             conn.session.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
@@ -50,13 +49,14 @@ if choice == "Schedule & Rosters":
                                  {"a": ta, "b": tb, "d": m_date})
             conn.session.commit(); st.success("Match Scheduled!"); st.rerun()
 
-# --- PAGE 2: LIVE SCORING ---
 elif choice == "Live Scoring":
-    matches = conn.query("SELECT * FROM matches WHERE status != 'Completed'")
-    if matches.empty: st.info("No active matches."); st.stop()
+    # Use raw SQL to fetch, as Streamlit's conn.query can be tricky with types
+    with conn.session as s:
+        matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
     
-    m_list = matches.to_dict('records')
-    m = st.selectbox("Select Match", m_list, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
+    if not matches: st.info("No active matches."); st.stop()
+    
+    m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
     
     if m['status'] == 'Scheduled':
         with st.form("toss_form"):
@@ -71,7 +71,6 @@ elif choice == "Live Scoring":
         state = json.loads(m['score_state'])
         st.metric("Score", f"{state['runs']}/{state['wickets']}", f"Overs: {state['balls']//6}.{state['balls']%6}")
         
-        # Scoring logic
         c1, c2, c3 = st.columns(3)
         if c1.button("0 Run"): 
             state['balls'] += 1
