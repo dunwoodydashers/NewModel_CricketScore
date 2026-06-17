@@ -1,5 +1,4 @@
 import streamlit as st
-from datetime import datetime
 import json
 from sqlalchemy import text
 
@@ -8,37 +7,27 @@ conn = st.connection("supabase", type="sql")
 
 def init_db():
     with conn.session as s:
-        # Create core tables
         s.execute(text('CREATE TABLE IF NOT EXISTS teams (id SERIAL PRIMARY KEY, name TEXT UNIQUE)'))
         s.execute(text('CREATE TABLE IF NOT EXISTS players (id SERIAL PRIMARY KEY, team_name TEXT, name TEXT)'))
-        
-        # Create matches table with simple columns initially
         s.execute(text('''CREATE TABLE IF NOT EXISTS matches (
-            id SERIAL PRIMARY KEY, 
-            team_a TEXT, team_b TEXT, date DATE, 
-            status TEXT DEFAULT 'Scheduled', 
-            toss_winner TEXT, toss_decision TEXT, 
-            total_overs INTEGER DEFAULT 20
+            id SERIAL PRIMARY KEY, team_a TEXT, team_b TEXT, date DATE, 
+            status TEXT DEFAULT 'Scheduled', toss_winner TEXT, toss_decision TEXT, 
+            total_overs INTEGER DEFAULT 20, 
+            score_state JSONB DEFAULT '{"runs":0, "wickets":0, "balls":0, "extras":0}'::jsonb
         )'''))
-        
-        # Add the complex JSONB column separately to avoid string formatting errors
-        try:
-            s.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS score_state JSONB DEFAULT '{\"runs\":0, \"wickets\":0, \"balls\":0, \"extras\":0}'::jsonb"))
-        except:
-            pass
         s.commit()
 
 init_db()
 
 # --- SCORING ENGINE ---
-def update_score(m_id, runs=0, wicket=False, extra_type=None):
+def update_score(m_id, runs=0, wicket=False, extra=False):
     with conn.session as s:
-        match = s.execute(text("SELECT score_state FROM matches WHERE id=:id"), {"id": m_id}).fetchone()
-        state = json.loads(match[0])
+        res = s.execute(text("SELECT score_state FROM matches WHERE id=:id"), {"id": m_id}).fetchone()
+        state = json.loads(res[0])
         state['runs'] += runs
         if wicket: state['wickets'] += 1
-        if not extra_type: state['balls'] += 1
-        else: state['extras'] += 1
+        if not extra: state['balls'] += 1
+        else: state['extras'] += runs
         s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m_id})
         s.commit()
 
@@ -67,18 +56,19 @@ if choice == "Schedule & Rosters":
         ta, tb = st.selectbox("Team A", teams), st.selectbox("Team B", teams)
         m_date = st.date_input("Date")
         if st.button("Schedule Match"): 
-            conn.session.execute(text("INSERT INTO matches (team_a, team_b, date) VALUES (:a, :b, :d)"), {"a": ta, "b": tb, "d": m_date}); conn.session.commit(); st.rerun()
+            conn.session.execute(text("INSERT INTO matches (team_a, team_b, date, status) VALUES (:a, :b, :d, 'Scheduled')"), {"a": ta, "b": tb, "d": m_date}); conn.session.commit(); st.rerun()
 
 elif choice == "Live Scoring":
-    # Broadened query to catch all non-completed matches
+    # Inclusive query: shows all matches
     matches = conn.query("SELECT * FROM matches WHERE status != 'Completed'")
-    if matches.empty: st.info("No active matches. Schedule one first."); st.stop()
+    if matches.empty: st.info("No active matches found. Please schedule one first."); st.stop()
     
-    m = st.selectbox("Select Match", matches.to_dict('records'), format_func=lambda x: f"{x['team_a']} vs {x['team_b']} (Status: {x['status']})")
+    m = st.selectbox("Select Match", matches.to_dict('records'), format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
     
-    if not m['toss_winner']:
-        with st.form("setup"):
-            overs = st.number_input("Overs", 1, 50, 20)
+    if m['status'] == 'Scheduled':
+        with st.form("toss_form"):
+            st.subheader("Start Match: Toss & Overs")
+            overs = st.number_input("Total Overs", 1, 50, 20)
             tw = st.radio("Toss Winner", [m['team_a'], m['team_b']])
             td = st.radio("Decision", ["Bat", "Bowl"])
             if st.form_submit_button("Start Match"): 
@@ -94,3 +84,7 @@ elif choice == "Live Scoring":
         if c2.button("1 Run"): update_score(m['id'], 1); st.rerun()
         if c3.button("Wicket"): update_score(m['id'], 0, True); st.rerun()
         if c4.button("End Match"): conn.session.execute(text("UPDATE matches SET status='Completed' WHERE id=:id"), {"id": m['id']}); conn.session.commit(); st.rerun()
+
+elif choice == "Match History":
+    for h in conn.query("SELECT * FROM matches WHERE status = 'Completed'").to_dict('records'):
+        st.write(f"✅ {h['team_a']} vs {h['team_b']} — {h['date']}")
