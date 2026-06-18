@@ -70,3 +70,7 @@ if rows:
 else:
     st.write("No tables found.")
 
+rows = run_query("SELECT current_database(), inet_server_addr(), inet_server_port()")
+st.table(rows.fetchall())
+
+
