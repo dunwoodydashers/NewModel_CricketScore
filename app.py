@@ -41,7 +41,10 @@ if st.button("Add Team"):
         st.warning("Team name cannot be empty.")
 
 # Show existing teams
-rows = run_query("SELECT id, name FROM teams ORDER BY id ASC")
+st.subheader("Connection Test")
 
-if rows:
-    st.table(rows.fetchall())
+try:
+    test = run_query("SELECT NOW()")
+    st.success(f"Database time: {test.fetchone()[0]}")
+except Exception as e:
+    st.error(f"Connection failed: {e}")
