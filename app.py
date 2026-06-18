@@ -94,8 +94,21 @@ rows = run_query("""
 """)
 st.table(rows.fetchall())
 
-run_query("INSERT INTO public.teams (name) VALUES (:name)", {"name": new_team.strip()})
-rows = run_query("SELECT id, name FROM public.teams ORDER BY id ASC")
-conn.session.commit()
-conn.session.close()
+def run_query(query, params=None):
+    try:
+        conn = st.connection("supabase", type="sql")
+        if params:
+            result = conn.session.execute(text(query), params)
+        else:
+            result = conn.session.execute(text(query))
+        conn.session.commit()   # commit happens here
+        return result
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        return None
+if st.button("Insert + Select Test"):
+    run_query("INSERT INTO public.teams (name) VALUES ('zzz_test')")
+    rows = run_query("SELECT * FROM public.teams ORDER BY id DESC LIMIT 5")
+    st.table(rows.fetchall())
+
 
