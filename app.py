@@ -89,3 +89,7 @@ rows2 = run_query("""
 """)
 st.table(rows2.fetchall())
 
+rows = run_query("""
+    SELECT * FROM public.teams
+""")
+st.table(rows.fetchall())
