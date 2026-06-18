@@ -6,7 +6,6 @@ from sqlalchemy import text
 # Connection is initialized once at the top. 
 # We rely on the Supabase SQL Editor having already created the tables.
 conn = st.connection("supabase", type="sql")
-
 st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
 st.title("🏏 Pro Cricket Scoring System")
 
