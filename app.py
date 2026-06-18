@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+import sql
 from sqlalchemy import text
 
 st.set_page_config(page_title="Pro Cricket Scoring System", layout="wide")
