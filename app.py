@@ -93,3 +93,9 @@ rows = run_query("""
     SELECT * FROM public.teams
 """)
 st.table(rows.fetchall())
+
+run_query("INSERT INTO public.teams (name) VALUES (:name)", {"name": new_team.strip()})
+rows = run_query("SELECT id, name FROM public.teams ORDER BY id ASC")
+conn.session.commit()
+conn.session.close()
+
