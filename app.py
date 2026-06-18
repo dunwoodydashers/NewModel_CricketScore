@@ -6,10 +6,12 @@ st.set_page_config(page_title="Pro Cricket Scoring System", layout="wide")
 # -----------------------------
 # DATABASE CONNECTION (Session Pooler)
 # -----------------------------
-conn = st.connection("supabase", type="sql")
+def get_conn():
+    return st.connection("supabase", type="sql")
 
 def run_query(query, params=None):
     try:
+        conn = get_conn()  # ensure fresh session
         if params:
             result = conn.session.execute(text(query), params)
         else:
