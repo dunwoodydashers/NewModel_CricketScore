@@ -53,4 +53,8 @@ st.success(f"Database time: {test.fetchone()[0]}")
 st.subheader("Database Info")
 info = run_query("SELECT current_database(), inet_server_addr(), inet_server_port()")
 
+rows = run_query("SELECT current_database(), inet_server_addr(), inet_server_port()")
+st.table(rows.fetchall())
+
+
 
