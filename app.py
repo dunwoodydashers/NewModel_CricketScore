@@ -2,57 +2,69 @@ import streamlit as st
 import json
 from sqlalchemy import text
 
-# 1. DATABASE CONFIGURATION
-# Streamlit will look for [connections.supabase] in your secrets.toml
+# Streamlit connects to the URL in your secrets.toml
+# Note: st.connection('supabase') works fine with Neon's Postgres URL
 conn = st.connection("supabase", type="sql")
 
-st.set_page_config(page_title="Pro Cricket Scoring System", layout="wide")
+st.set_page_config(page_title="Pro Cricket Scorer", layout="wide")
 st.title("🏏 Pro Cricket Scoring System")
 
-# 2. HELPER FUNCTIONS (Defined BEFORE usage)
-def execute_query(query, params=None):
+def get_teams():
     try:
         with conn.session as s:
-            result = s.execute(text(query), params or {})
-            s.commit()
-            return result
+            result = s.execute(text("SELECT name FROM teams")).fetchall()
+        return [r[0] for r in result]
     except Exception as e:
-        st.error(f"Database error: {e}")
-        return None
+        return []
 
-# 3. UI
-st.subheader("Manage Teams")
-new_team = st.text_input("New Team Name")
+menu = ["Schedule & Rosters", "Live Scoring"]
+choice = st.sidebar.selectbox("Menu", menu)
 
-if st.button("Add Team"):
-    if new_team.strip():
-        # Using the helper function
-        execute_query("INSERT INTO public.teams (name) VALUES (:name)", {"name": new_team.strip()})
-        st.success(f"Team '{new_team}' added!")
-        st.rerun() # Refresh to see changes
-    else:
-        st.warning("Team name cannot be empty.")
+if choice == "Schedule & Rosters":
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Manage Teams")
+        t_name = st.text_input("New Team Name")
+        if st.button("Add Team"):
+            if t_name.strip():
+                with conn.session as s:
+                    s.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name.strip()})
+                    s.commit()
+                st.rerun()
 
-# Show existing teams
-st.subheader("Teams in Database")
-try:
-    with conn.session as s:
-        # If this returns empty, RLS is likely still on!
-        teams = s.execute(text("SELECT id, name FROM public.teams ORDER BY id ASC")).fetchall()
-        if teams:
-            st.table(teams)
-        else:
-            st.info("No teams found in database.")
-except Exception as e:
-    st.error(f"Could not read from database: {e}")
-
-# Diagnostics (Hidden in sidebar to keep UI clean)
-with st.sidebar:
-    st.subheader("Diagnostics")
-    if st.button("Check Connection"):
-        try:
+        teams = get_teams()
+        sel_t = st.selectbox("Select Team", teams if teams else ["Add a team first"])
+        p_name = st.text_input("Player Name")
+        if st.button("Add Player"):
             with conn.session as s:
-                time = s.execute(text("SELECT NOW()")).fetchone()
-                st.success(f"Database Time: {time[0]}")
-        except Exception as e:
-            st.error(f"Connection Failed: {e}")
+                s.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
+                s.commit()
+            st.rerun()
+
+    with c2:
+        st.subheader("Schedule Match")
+        teams = get_teams()
+        ta = st.selectbox("Team A", teams if teams else [])
+        tb = st.selectbox("Team B", teams if teams else [])
+        if st.button("Schedule Match"):
+            with conn.session as s:
+                s.execute(text("INSERT INTO matches (team_a, team_b, status) VALUES (:a, :b, 'Scheduled')"), {"a": ta, "b": tb})
+                s.commit()
+            st.success("Match Scheduled!")
+
+elif choice == "Live Scoring":
+    with conn.session as s:
+        matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
+    
+    if not matches:
+        st.info("No active matches.")
+    else:
+        m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']}")
+        state = json.loads(m['score_state'])
+        st.metric("Score", f"{state['runs']}/{state['wickets']}")
+        if st.button("Add Run"):
+            state['runs'] += 1
+            with conn.session as s:
+                s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']})
+                s.commit()
+            st.rerun()
