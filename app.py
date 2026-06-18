@@ -1,62 +1,58 @@
 import streamlit as st
+import json
 from sqlalchemy import text
 
+# 1. DATABASE CONFIGURATION
+# Streamlit will look for [connections.supabase] in your secrets.toml
+conn = st.connection("supabase", type="sql")
+
 st.set_page_config(page_title="Pro Cricket Scoring System", layout="wide")
-from sqlalchemy import create_engine, text
+st.title("🏏 Pro Cricket Scoring System")
 
-# Replace this with your actual connection string from Supabase
-DATABASE_URL = "postgresql://postgres:66K8xW2Ppo739Sl5@db.obxgreuuefitwjakjkkx.supabase.co:5432/postgres"
-
-# Create the engine
-engine = create_engine(DATABASE_URL)
-
-# How to use it:
-def add_team_direct(team_name):
+# 2. HELPER FUNCTIONS (Defined BEFORE usage)
+def execute_query(query, params=None):
     try:
-        with engine.connect() as conn:
-            conn.execute(text("INSERT INTO teams (name) VALUES (:name)"), {"name": team_name})
-            conn.commit()
-        return True
+        with conn.session as s:
+            result = s.execute(text(query), params or {})
+            s.commit()
+            return result
     except Exception as e:
-        st.error(f"Direct connection error: {e}")
-        return False
+        st.error(f"Database error: {e}")
+        return None
 
-# -----------------------------
-# UI
-# -----------------------------
-st.title("Manage Teams")
-
+# 3. UI
+st.subheader("Manage Teams")
 new_team = st.text_input("New Team Name")
 
 if st.button("Add Team"):
     if new_team.strip():
-        run_query(
-            "INSERT INTO public.teams (name) VALUES (:name)",
-            {"name": new_team.strip()}
-        )
+        # Using the helper function
+        execute_query("INSERT INTO public.teams (name) VALUES (:name)", {"name": new_team.strip()})
         st.success(f"Team '{new_team}' added!")
+        st.rerun() # Refresh to see changes
     else:
         st.warning("Team name cannot be empty.")
 
-if st.button("Test Insert"):
-    run_query("INSERT INTO public.teams (name) VALUES ('connection_test')")
-    st.success("Insert worked")
-
 # Show existing teams
-rows = run_query("SELECT id, name FROM public.teams ORDER BY id ASC")
 st.subheader("Teams in Database")
-st.table(rows.fetchall())
+try:
+    with conn.session as s:
+        # If this returns empty, RLS is likely still on!
+        teams = s.execute(text("SELECT id, name FROM public.teams ORDER BY id ASC")).fetchall()
+        if teams:
+            st.table(teams)
+        else:
+            st.info("No teams found in database.")
+except Exception as e:
+    st.error(f"Could not read from database: {e}")
 
-# Diagnostics
-st.subheader("Connection Test")
-test = run_query("SELECT NOW()")
-st.success(f"Database time: {test.fetchone()[0]}")
-
-st.subheader("Database Info")
-info = run_query("SELECT current_database(), inet_server_addr(), inet_server_port()")
-
-rows = run_query("SELECT current_database(), inet_server_addr(), inet_server_port()")
-st.table(rows.fetchall())
-
-
-
+# Diagnostics (Hidden in sidebar to keep UI clean)
+with st.sidebar:
+    st.subheader("Diagnostics")
+    if st.button("Check Connection"):
+        try:
+            with conn.session as s:
+                time = s.execute(text("SELECT NOW()")).fetchone()
+                st.success(f"Database Time: {time[0]}")
+        except Exception as e:
+            st.error(f"Connection Failed: {e}")
