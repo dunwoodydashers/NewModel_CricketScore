@@ -1,25 +1,27 @@
+import os
 import streamlit as st
-import json
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
-# --- PAGE CONFIG ---
-st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
-st.title("🏏 Pro Cricket Scoring System")
+# Build connection URL from Railway env vars
+db_url = (
+    f"postgresql://{os.getenv('SUPABASE_USERNAME')}:{os.getenv('SUPABASE_PASSWORD')}"
+    f"@{os.getenv('SUPABASE_HOST')}:{os.getenv('SUPABASE_PORT')}/"
+    f"{os.getenv('SUPABASE_DATABASE')}"
+)
 
-# --- DATABASE CONNECTION ---
-# Requires secrets in Streamlit Cloud:
-# [supabase]
-# dialect = "postgresql"
-# host = "<your-project>.supabase.co"
-# port = 5432
-# database = "postgres"
-# username = "postgres"
-# password = "<YOUR_SUPABASE_DB_PASSWORD>"
-try:
-    conn = st.connection("supabase", type="sql")
-except Exception as e:
-    st.error("❌ Could not connect to database. Check Streamlit secrets and Supabase credentials.")
-    st.stop()
+# Create SQLAlchemy engine
+engine = create_engine(db_url)
+
+# Streamlit connection wrapper
+class Conn:
+    def __init__(self, engine):
+        self.engine = engine
+
+    @property
+    def session(self):
+        return self.engine.connect()
+
+conn = Conn(engine)
 
 # --- HELPER FUNCTIONS ---
 def get_teams():
