@@ -5,7 +5,7 @@ st.set_page_config(page_title="Pro Cricket Scoring System", layout="wide")
 from sqlalchemy import create_engine, text
 
 # Replace this with your actual connection string from Supabase
-DATABASE_URL = "postgresql://postgres:[YOUR_PASSWORD]@db.[YOUR_PROJECT_ID].supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres:66K8xW2Ppo739Sl5@db.obxgreuuefitwjakjkkx.supabase.co:5432/postgres"
 
 # Create the engine
 engine = create_engine(DATABASE_URL)
