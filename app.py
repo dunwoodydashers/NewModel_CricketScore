@@ -56,3 +56,17 @@ try:
     st.success(f"Database time: {test.fetchone()[0]}")
 except Exception as e:
     st.error(f"Connection failed: {e}")
+
+st.subheader("Check which 'teams' table exists")
+
+rows = run_query("""
+    SELECT table_schema, table_name 
+    FROM information_schema.tables 
+    WHERE table_name ILIKE '%team%'
+""")
+
+if rows:
+    st.table(rows.fetchall())
+else:
+    st.write("No tables found.")
+
