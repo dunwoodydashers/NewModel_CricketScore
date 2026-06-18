@@ -4,7 +4,12 @@ from sqlalchemy import text
 
 # Streamlit connects to the URL in your secrets.toml
 # Note: st.connection('supabase') works fine with Neon's Postgres URL
-conn = st.connection("supabase", type="sql")
+# Update the connection call to pass SSL mode explicitly
+conn = st.connection(
+    "supabase", 
+    type="sql",
+    connect_args={"sslmode": "require"} 
+)
 
 st.set_page_config(page_title="Pro Cricket Scorer", layout="wide")
 st.title("🏏 Pro Cricket Scoring System")
