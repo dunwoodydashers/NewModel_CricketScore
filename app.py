@@ -73,4 +73,19 @@ else:
 rows = run_query("SELECT current_database(), inet_server_addr(), inet_server_port()")
 st.table(rows.fetchall())
 
+st.subheader("Where is the row actually going?")
+
+rows = run_query("""
+    SELECT table_schema, table_name
+    FROM information_schema.tables
+    WHERE table_name = 'teams'
+""")
+st.table(rows.fetchall())
+
+rows2 = run_query("""
+    SELECT table_schema, table_name
+    FROM information_schema.columns
+    WHERE column_name = 'name'
+""")
+st.table(rows2.fetchall())
 
