@@ -3,7 +3,8 @@ import json
 from sqlalchemy import text
 
 # --- DATABASE SETUP ---
-# No more init_db() here; the SQL Editor handles the schema!
+# Connection is initialized once at the top. 
+# We rely on the Supabase SQL Editor having already created the tables.
 conn = st.connection("supabase", type="sql")
 
 st.set_page_config(layout="wide", page_title="Pro Cricket Scorer")
@@ -12,8 +13,9 @@ st.title("🏏 Pro Cricket Scoring System")
 # --- HELPER FUNCTIONS ---
 def get_teams():
     try:
-        # Fetch current teams
-        result = conn.session.execute(text("SELECT name FROM teams")).fetchall()
+        # Fetch current teams from the DB
+        with conn.session as s:
+            result = s.execute(text("SELECT name FROM teams")).fetchall()
         return [r[0] for r in result]
     except Exception as e:
         st.error(f"Error fetching teams: {e}")
@@ -39,9 +41,10 @@ if choice == "Schedule & Rosters":
         sel_t = st.selectbox("Select Team for Player", teams if teams else ["Add a team first"])
         p_name = st.text_input("Player Name")
         if st.button("Add Player"): 
-            conn.session.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
-            conn.session.commit()
-            st.rerun()
+            if p_name:
+                conn.session.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
+                conn.session.commit()
+                st.rerun()
             
     with c2:
         st.subheader("Schedule Match")
@@ -61,7 +64,7 @@ elif choice == "Live Scoring":
     with conn.session as s:
         matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
     
-    if not matches: st.info("No active matches."); st.stop()
+    if not matches: st.info("No active matches found. Please schedule one first."); st.stop()
     
     m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
     
