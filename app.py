@@ -40,6 +40,14 @@ if st.button("Add Team"):
     else:
         st.warning("Team name cannot be empty.")
 
+if st.button("Test Insert"):
+    try:
+        run_query("INSERT INTO teams (name) VALUES ('connection_test')")
+        st.success("Insert worked")
+    except Exception as e:
+        st.error(f"Insert failed: {e}")
+
+
 # Show existing teams
 st.subheader("Connection Test")
 
