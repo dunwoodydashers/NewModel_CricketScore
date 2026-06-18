@@ -2,22 +2,24 @@ import streamlit as st
 from sqlalchemy import text
 
 st.set_page_config(page_title="Pro Cricket Scoring System", layout="wide")
+from sqlalchemy import create_engine, text
 
-# -----------------------------
-# DATABASE CONNECTION (Session Pooler)
-# -----------------------------
-def run_query(query, params=None):
+# Replace this with your actual connection string from Supabase
+DATABASE_URL = "postgresql://postgres:[YOUR_PASSWORD]@db.[YOUR_PROJECT_ID].supabase.co:5432/postgres"
+
+# Create the engine
+engine = create_engine(DATABASE_URL)
+
+# How to use it:
+def add_team_direct(team_name):
     try:
-        conn = st.connection("supabase", type="sql")
-        if params:
-            result = conn.session.execute(text(query), params)
-        else:
-            result = conn.session.execute(text(query))
-        conn.session.commit()
-        return result
+        with engine.connect() as conn:
+            conn.execute(text("INSERT INTO teams (name) VALUES (:name)"), {"name": team_name})
+            conn.commit()
+        return True
     except Exception as e:
-        st.error(f"Database error: {e}")
-        return None
+        st.error(f"Direct connection error: {e}")
+        return False
 
 # -----------------------------
 # UI
