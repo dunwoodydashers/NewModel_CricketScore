@@ -72,7 +72,12 @@ elif choice == "Live Scoring":
         m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']}")
         
         # 2. Parse the score (JSON state)
-        state = json.loads(m['score_state'])
+        # Safer way to handle JSONB columns
+    score_val = m['score_state']
+        if isinstance(score_val, dict):
+            state = score_val  # It's already a dictionary, use it directly
+        else:
+    state = json.loads(score_val) # It's a string, parse it
         
         # 3. Display Scorecard
         col1, col2, col3 = st.columns(3)
