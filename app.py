@@ -57,19 +57,64 @@ if choice == "Schedule & Rosters":
                 s.commit()
             st.success("Match Scheduled!")
 
+# --- ADD THIS TO YOUR APP.PY ---
+
 elif choice == "Live Scoring":
+    st.subheader("Live Match Tracker")
+    
+    # 1. Fetch live matches
     with conn.session as s:
         matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
     
     if not matches:
-        st.info("No active matches.")
+        st.info("No active matches found. Go to 'Schedule & Rosters' to start one!")
     else:
         m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']}")
+        
+        # 2. Parse the score (JSON state)
         state = json.loads(m['score_state'])
-        st.metric("Score", f"{state['runs']}/{state['wickets']}")
-        if st.button("Add Run"):
-            state['runs'] += 1
+        
+        # 3. Display Scorecard
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Runs", state['runs'])
+        col2.metric("Wickets", state['wickets'])
+        col3.metric("Overs", f"{state['balls'] // 6}.{state['balls'] % 6}")
+        
+        # 4. Scoring Buttons
+        st.write("---")
+        b1, b2, b3, b4, b5 = st.columns(5)
+        
+        if b1.button("0 Run"):
+            state['balls'] += 1
             with conn.session as s:
                 s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']})
                 s.commit()
+            st.rerun()
+            
+        if b2.button("1 Run"):
+            state['runs'] += 1; state['balls'] += 1
+            with conn.session as s:
+                s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']})
+                s.commit()
+            st.rerun()
+            
+        if b3.button("4 Runs"):
+            state['runs'] += 4; state['balls'] += 1
+            with conn.session as s:
+                s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']})
+                s.commit()
+            st.rerun()
+            
+        if b4.button("Wicket"):
+            state['wickets'] += 1; state['balls'] += 1
+            with conn.session as s:
+                s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']})
+                s.commit()
+            st.rerun()
+
+        if b5.button("End Match"):
+            with conn.session as s:
+                s.execute(text("UPDATE matches SET status='Completed' WHERE id=:id"), {"id": m['id']})
+                s.commit()
+            st.success("Match marked as completed!")
             st.rerun()
