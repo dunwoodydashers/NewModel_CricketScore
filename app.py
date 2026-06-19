@@ -79,7 +79,7 @@ elif choice == "Live Scoring":
             # (or just combine it into the Start Match flow)
             
         # 2. LINEUP PHASE: Select Players
-        elif m['status'] == 'Lineup':
+elif m['status'] == 'Lineup':
             st.subheader("Select Openers & Bowler")
             # Fetch players for Team A and Team B
             with conn.session as s:
@@ -98,7 +98,7 @@ elif choice == "Live Scoring":
                 st.rerun()
 
         # 3. SCORING PHASE: Live
-        elif m['status'] == 'Live':
+elif m['status'] == 'Live':
             st.write(f"**Striker:** {m['striker_id']} | **Non-Striker:** {m['non_striker_id']} | **Bowler:** {m['bowler_id']}")
             
             # Now your buttons can update the stats of these specific players
