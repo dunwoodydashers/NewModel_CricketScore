@@ -80,26 +80,26 @@ elif choice == "Live Scoring":
             
         # 2. LINEUP PHASE: Select Players
 elif m['status'] == 'Lineup':
-            st.subheader("Select Openers & Bowler")
+    st.subheader("Select Openers & Bowler")
             # Fetch players for Team A and Team B
-            with conn.session as s:
-                players = s.execute(text("SELECT name FROM players WHERE team_name IN (:a, :b)"), {"a": m['team_a'], "b": m['team_b']}).fetchall()
+    with conn.session as s:
+        players = s.execute(text("SELECT name FROM players WHERE team_name IN (:a, :b)"), {"a": m['team_a'], "b": m['team_b']}).fetchall()
             
-            p_list = [p[0] for p in players]
-            s1 = st.selectbox("Striker", p_list)
-            s2 = st.selectbox("Non-Striker", p_list)
-            b = st.selectbox("Bowler", p_list)
+    p_list = [p[0] for p in players]
+    s1 = st.selectbox("Striker", p_list)
+    s2 = st.selectbox("Non-Striker", p_list)
+    b = st.selectbox("Bowler", p_list)
             
-            if st.button("Start Ball-by-Ball"):
-                with conn.session as s:
-                    s.execute(text("UPDATE matches SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live' WHERE id=:id"), 
-                              {"s1": s1, "s2": s2, "b": b, "id": m['id']})
-                    s.commit()
-                st.rerun()
+    if st.button("Start Ball-by-Ball"):
+        with conn.session as s:
+            s.execute(text("UPDATE matches SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live' WHERE id=:id"), 
+                    {"s1": s1, "s2": s2, "b": b, "id": m['id']})
+            s.commit()
+        st.rerun()
 
         # 3. SCORING PHASE: Live
 elif m['status'] == 'Live':
-            st.write(f"**Striker:** {m['striker_id']} | **Non-Striker:** {m['non_striker_id']} | **Bowler:** {m['bowler_id']}")
+    st.write(f"**Striker:** {m['striker_id']} | **Non-Striker:** {m['non_striker_id']} | **Bowler:** {m['bowler_id']}")
             
             # Now your buttons can update the stats of these specific players
             # e.g., if b2.button("1 Run"):
