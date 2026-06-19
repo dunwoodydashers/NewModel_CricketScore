@@ -77,7 +77,7 @@ elif choice == "Live Scoring":
     if isinstance(score_val, dict):
         state = score_val  # It's already a dictionary, use it directly
     else:
-    state = json.loads(score_val) # It's a string, parse it
+        state = json.loads(score_val) # It's a string, parse it
         
         # 3. Display Scorecard
         col1, col2, col3 = st.columns(3)
