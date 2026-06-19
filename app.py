@@ -73,23 +73,51 @@ elif choice == "Live Scoring":
                     st.rerun()
 
         # --- PHASE 2: LINEUP (Select Players) ---
+        # --- PHASE 2: LINEUP (Select Players) ---
         elif m['status'] == 'Lineup':
+            # 1. Determine Batting vs Bowling Team
+            if m['toss_decision'] == 'Bat':
+                batting_team = m['toss_winner']
+                bowling_team = m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b']
+            else: # Decision was 'Bowl'
+                bowling_team = m['toss_winner']
+                batting_team = m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b']
+
+            st.info(f"🏆 {m['toss_winner']} won the toss and chose to {m['toss_decision']}!")
+            st.subheader("Select Openers & Bowler")
+
+            # 2. Fetch players specifically for these roles
             with conn.session as s:
-                players = s.execute(text("SELECT name FROM players WHERE team_name IN (:a, :b)"), {"a": m['team_a'], "b": m['team_b']}).fetchall()
+                batting_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": batting_team}).fetchall()
+                bowling_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": bowling_team}).fetchall()
             
-            p_list = [p[0] for p in players]
-            if not p_list: st.warning("Add players first!"); st.stop()
+            bat_list = [p[0] for p in batting_players]
+            bowl_list = [p[0] for p in bowling_players]
             
-            s1 = st.selectbox("Striker", p_list)
-            s2 = st.selectbox("Non-Striker", p_list)
-            b = st.selectbox("Bowler", p_list)
+            if not bat_list or not bowl_list: 
+                st.warning("Ensure both teams have players in the 'Schedule & Rosters' tab!")
+                st.stop()
+            
+            # 3. Dropdowns filtered by role
+            s1 = st.selectbox("Striker (Batting Team: " + batting_team + ")", bat_list)
+            s2 = st.selectbox("Non-Striker (Batting Team: " + batting_team + ")", bat_list)
+            b = st.selectbox("Bowler (Bowling Team: " + bowling_team + ")", bowl_list)
             
             if st.button("Start Ball-by-Ball"):
                 with conn.session as s:
-                    s.execute(text("UPDATE matches SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live', score_state=:ss WHERE id=:id"), 
-                              {"s1": s1, "s2": s2, "b": b, "ss": json.dumps({"runs":0, "wickets":0, "balls":0}), "id": m['id']})
+                    s.execute(text("""
+                        UPDATE matches 
+                        SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live', 
+                            batting_team=:bt, bowling_team=:bowlt 
+                        WHERE id=:id
+                    """), 
+                    {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, "id": m['id']})
                     s.commit()
                 st.rerun()
+
+
+
+        #============================================
 
         # --- PHASE 3: LIVE SCORING ---
         elif m['status'] == 'Live':
