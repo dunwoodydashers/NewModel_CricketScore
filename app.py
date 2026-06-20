@@ -311,15 +311,23 @@ if choice == "Schedule & Rosters":
                     s.execute(text(sql), params)
                     s.commit()
                 st.success("Match Scheduled!")
-                st.experimental_rerun()
+        # Safe rerun: only call if available, otherwise fall back to a harmless session_state toggle
+                if hasattr(st, "experimental_rerun"):
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                # If it still fails for some reason, fall back to a soft refresh
+                        st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
+                else:
+            # Soft refresh fallback for environments without experimental_rerun
+                    st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
             except Exception as e:
-        # Debug output - remove after fixing
                 st.error("Scheduling failed: " + str(e))
                 st.write("SQL:", sql)
                 st.write("Params:", params)
-        # Also print DB error details if available
                 import traceback
                 st.text(traceback.format_exc())
+
 
 
 # -------------------------
