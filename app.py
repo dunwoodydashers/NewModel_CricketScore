@@ -4,13 +4,18 @@ from sqlalchemy import text
 import pandas as pd
 from copy import deepcopy
 
-# --- KEEP YOUR ORIGINAL CONNECTION LINE ---
+# -------------------------
+# CONFIGURATION / CONNECTION
+# -------------------------
+# Keep your original connection line here
 conn = st.connection("supabase", type="sql", connect_args={"sslmode": "require"})
 
 st.set_page_config(page_title="Pro Cricket Scorer", layout="wide")
-st.title("🏏 Pro Cricket Scoring System (Pro + Undo + 2 Innings)")
+st.title("🏏 Pro Cricket Scoring System (Full)")
 
-# --- HELPERS ---
+# -------------------------
+# HELPERS
+# -------------------------
 def get_teams():
     try:
         with conn.session as s:
@@ -29,7 +34,8 @@ def upgrade_to_pro_state(state, striker, non_striker, bowler):
             "bowling": {},         # name -> {runs, balls, wickets, wd, nb}
             "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0},
             "history": [],         # stack of previous states for undo
-            "free_hit": False      # free-hit active for next legal delivery
+            "free_hit": False,     # free-hit active for next legal delivery
+            "need_new_bowler": False
         }
 
     for p in (striker, non_striker):
@@ -39,18 +45,18 @@ def upgrade_to_pro_state(state, striker, non_striker, bowler):
     if bowler and bowler not in state["bowling"]:
         state["bowling"][bowler] = {"runs": 0, "balls": 0, "wickets": 0, "wd": 0, "nb": 0}
 
-    # ensure history exists
     if "history" not in state:
         state["history"] = []
     if "free_hit" not in state:
         state["free_hit"] = False
+    if "need_new_bowler" not in state:
+        state["need_new_bowler"] = False
 
     return state
 
 def push_history(state):
     # store a deep copy of the state for undo (limit history length)
     h = deepcopy(state)
-    # remove history from the snapshot to avoid recursion explosion
     h.pop("history", None)
     state["history"].append(h)
     if len(state["history"]) > 50:
@@ -60,7 +66,6 @@ def push_history(state):
 def pop_history(state):
     if state.get("history"):
         prev = state["history"].pop()
-        # restore previous state but keep current history list
         prev["history"] = state.get("history", [])
         return prev
     return state
@@ -77,13 +82,12 @@ def process_ball(state, action, striker, bowler):
     # Save snapshot for undo BEFORE applying this ball
     state = push_history(state)
 
-    # Helper to mark legal ball
     def legal_ball():
         state["balls"] += 1
         state["bowling"][bowler]["balls"] += 1
 
-    # Free-hit logic: if free_hit True, wickets (except run-out) do not count
     free_hit = state.get("free_hit", False)
+    return_after = None
 
     if t == "run":
         state["runs"] += v
@@ -93,25 +97,18 @@ def process_ball(state, action, striker, bowler):
         if v == 4: state["batting"][striker]["4s"] += 1
         if v == 6: state["batting"][striker]["6s"] += 1
         state["bowling"][bowler]["runs"] += v
-
-        # rotate strike on odd runs
         if v % 2 == 1:
-            return_after = "swap"
-        else:
-            return_after = None
-
-        # free_hit cleared after next legal delivery
+            # rotate strike on odd runs
+            st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
         if free_hit:
             state["free_hit"] = False
 
     elif t == "wkt":
-        # wicket on legal ball; if free_hit, ignore wicket (except run-out)
         if free_hit:
-            # treat as dot ball (legal) but no wicket
+            # legal ball but wicket ignored (except run-out)
             legal_ball()
             state["bowling"][bowler]["runs"] += 0
             state["free_hit"] = False
-            return_after = None
         else:
             state["wickets"] += 1
             legal_ball()
@@ -120,74 +117,48 @@ def process_ball(state, action, striker, bowler):
             return_after = "wicket"
 
     elif t == "runout":
-        # run-out: can happen on legal ball; specify out_player and optionally new_batter
         legal_ball()
         state["runs"] += v
         state["bowling"][bowler]["runs"] += v
-        # credit runs to striker for simplicity (you can adapt)
+        # credit runs to striker for simplicity
         state["batting"][striker]["runs"] += v
         state["batting"][striker]["balls"] += 1
         if v == 4: state["batting"][striker]["4s"] += 1
         if v == 6: state["batting"][striker]["6s"] += 1
         state["wickets"] += 1
         state["bowling"][bowler]["wickets"] += 1
-        out_player = action.get("out_player")
-        new_batter = action.get("new_batter")
-        if out_player and out_player in state["batting"]:
-            # remove or mark out by deleting batting entry (we keep stats but remove from active)
-            # We'll keep stats but not remove the key; instead caller should set striker/non_striker
-            pass
         return_after = "wicket"
 
     elif t == "wd":
-        # wide: extra(s), not a legal ball
         state["runs"] += v
         state["extras"]["wd"] += v
         state["bowling"][bowler]["wd"] += v
         state["bowling"][bowler]["runs"] += v
-        return_after = None
 
     elif t == "nb":
-        # no-ball: extra(s), not a legal ball; next legal delivery is free-hit
         state["runs"] += v
         state["extras"]["nb"] += v
         state["bowling"][bowler]["nb"] += v
         state["bowling"][bowler]["runs"] += v
         state["free_hit"] = True
-        return_after = None
 
     elif t in ("bye", "lb"):
-        # byes/leg-byes: extras, legal ball
         state["runs"] += v
         state["extras"][t] += v
         legal_ball()
         state["bowling"][bowler]["runs"] += v
-        return_after = None
 
-    else:
-        return_after = None
-
-    # After processing, handle strike rotation and over-end
-    # If return_after == "swap", swap striker/non-striker
-    if return_after == "swap":
-        st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
-
-    # If wicket happened, caller UI should prompt for new batter and update striker/non-striker accordingly
-
-    # If free_hit was active and we just bowled a legal ball, clear it (handled above for run/wkt)
-    # Check over end: if legal balls %6 == 0 -> over ended
+    # Over-end check: if legal balls %6 == 0 -> over ended
     if state["balls"] > 0 and state["balls"] % 6 == 0:
+        state["need_new_bowler"] = True
         # rotate strike at over end
         st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
-        # mark that a new bowler should be chosen (UI will allow changing bowler)
-        state["need_new_bowler"] = True
     else:
         state["need_new_bowler"] = False
 
     return state
 
 def save_state_to_db(match_id, state, m_updates=None):
-    # m_updates: dict of other match columns to update (striker_id, non_striker_id, bowler_id, innings_number, target, status)
     payload = {"ss": json.dumps(state), "id": match_id}
     set_clauses = ["score_state = :ss"]
     if m_updates:
@@ -209,14 +180,10 @@ def load_state_from_db(m):
         return None
 
 def finish_innings(m, state):
-    # Called when innings ends (overs completed or 10 wickets)
-    # If first innings -> set target and prepare second innings
     innings = m.get("innings_number") or 1
     if innings == 1:
         target = state["runs"] + 1
-        # update DB: set innings_number=2, set target, swap batting/bowling teams, reset striker/non-striker/bowler and state
-        new_state = {"runs": 0, "wickets": 0, "balls": 0, "batting": {}, "bowling": {}, "extras": {"wd":0,"nb":0,"bye":0,"lb":0}, "history": [], "free_hit": False}
-        # swap teams
+        new_state = {"runs": 0, "wickets": 0, "balls": 0, "batting": {}, "bowling": {}, "extras": {"wd":0,"nb":0,"bye":0,"lb":0}, "history": [], "free_hit": False, "need_new_bowler": False}
         batting_team = m.get("bowling_team")
         bowling_team = m.get("batting_team")
         with conn.session as s:
@@ -227,7 +194,6 @@ def finish_innings(m, state):
             s.commit()
         return {"next_phase": "second_innings", "target": target}
     else:
-        # second innings finished -> decide winner
         target = m.get("target", 0)
         if state["runs"] >= target:
             winner = m.get("batting_team")
@@ -238,15 +204,16 @@ def finish_innings(m, state):
             s.commit()
         return {"next_phase": "match_completed", "winner": winner}
 
-# --- UI LAYOUT ---
+# -------------------------
+# UI LAYOUT
+# -------------------------
 menu = ["Schedule & Rosters", "Live Scoring"]
 choice = st.sidebar.selectbox("Menu", menu)
 
-# (Schedule & Rosters code unchanged; omitted here for brevity — keep your existing implementation)
-# For brevity in this snippet, assume Schedule & Rosters section remains as in your app above.
-
+# -------------------------
+# SCHEDULE & ROSTERS
+# -------------------------
 if choice == "Schedule & Rosters":
-    # (reuse your existing Schedule & Rosters UI)
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Manage Teams & Players")
@@ -275,8 +242,12 @@ if choice == "Schedule & Rosters":
             with conn.session as s:
                 s.execute(text("INSERT INTO matches (team_a, team_b, status, innings_number) VALUES (:a, :b, 'Scheduled', 1)"), {"a": ta, "b": tb})
                 s.commit()
-            st.success("Match Scheduled!"); st.experimental_rerun()
+            st.success("Match Scheduled!")
+            st.experimental_rerun()
 
+# -------------------------
+# LIVE SCORING
+# -------------------------
 elif choice == "Live Scoring":
     st.subheader("Live Match Tracker")
     with conn.session as s:
@@ -322,7 +293,7 @@ elif choice == "Live Scoring":
             b = st.selectbox("Bowler", bowl_list)
 
             if st.button("Start Ball-by-Ball"):
-                initial_state = {"runs": 0, "wickets": 0, "balls": 0, "batting": {}, "bowling": {}, "extras": {"wd":0,"nb":0,"bye":0,"lb":0}, "history": [], "free_hit": False}
+                initial_state = {"runs": 0, "wickets": 0, "balls": 0, "batting": {}, "bowling": {}, "extras": {"wd":0,"nb":0,"bye":0,"lb":0}, "history": [], "free_hit": False, "need_new_bowler": False}
                 initial_state = upgrade_to_pro_state(initial_state, s1, s2, b)
                 with conn.session as s:
                     s.execute(text("""
@@ -343,7 +314,7 @@ elif choice == "Live Scoring":
                 st.session_state["striker"] = m.get("striker_id")
                 st.session_state["non_striker"] = m.get("non_striker_id")
                 st.session_state["bowler"] = m.get("bowler_id")
-                st.session_state["target"] = m.get("target")  # may be None for first innings
+                st.session_state["target"] = m.get("target")
                 st.session_state["total_overs"] = m.get("total_overs") or 0
                 st.session_state["innings_number"] = m.get("innings_number") or 1
 
@@ -365,9 +336,7 @@ elif choice == "Live Scoring":
             for i, val in enumerate([1,2,3,4,5,6]):
                 if cols[i].button(str(val)):
                     state = process_ball(state, {"type":"run","val":val}, st.session_state["striker"], st.session_state["bowler"])
-                    # rotate strike on odd runs handled inside process_ball via session_state swap
                     st.session_state["state"] = state
-                    # persist striker/non-striker/bowler and state
                     save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]})
                     st.experimental_rerun()
 
@@ -384,46 +353,46 @@ elif choice == "Live Scoring":
                 save_state_to_db(m["id"], state)
                 st.experimental_rerun()
 
+            # Bye flow: show a small inline confirm
             if cols2[2].button("Bye"):
                 val = st.number_input("Bye runs", min_value=0, max_value=6, value=0, key=f"bye_{m['id']}")
-                if st.button("Confirm Bye"):
+                if st.button("Confirm Bye", key=f"confirm_bye_{m['id']}"):
                     state = process_ball(state, {"type":"bye","val":val}, st.session_state["striker"], st.session_state["bowler"])
                     st.session_state["state"] = state
                     save_state_to_db(m["id"], state)
                     st.experimental_rerun()
 
+            # Wicket flow: show remaining batters dropdown when confirming wicket
             if cols2[3].button("Wicket"):
-                # show inline inputs for wicket type
-                wtype = st.selectbox("Wicket Type", ["Bowled/Caught/Other", "Run-out"], key=f"wtype_{m['id']}")
-                if wtype == "Run-out":
-                    out_player = st.text_input("Out Player Name", key=f"out_{m['id']}")
-                    new_batter = st.text_input("New Batter Name", key=f"nb_{m['id']}")
-                    if st.button("Confirm Run-out"):
-                        state = process_ball(state, {"type":"runout","val":0,"out_player":out_player,"new_batter":new_batter}, st.session_state["striker"], st.session_state["bowler"])
-                        # replace out player with new batter if provided
-                        if new_batter and new_batter.strip():
-                            state = upgrade_to_pro_state(state, new_batter.strip(), st.session_state["non_striker"], st.session_state["bowler"])
-                            # if out player was striker, set striker to new batter; else if non-striker, set non_striker
-                            if out_player == st.session_state["striker"]:
-                                st.session_state["striker"] = new_batter.strip()
-                            elif out_player == st.session_state["non_striker"]:
-                                st.session_state["non_striker"] = new_batter.strip()
+                # Fetch full batting squad for batting_team
+                with conn.session as s:
+                    all_bat_players = [r[0] for r in s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": m.get("batting_team")}).fetchall()]
+
+                already_used = set(state["batting"].keys())
+                remaining_batters = [p for p in all_bat_players if p not in already_used]
+
+                st.write("### Wicket — Select replacement batter")
+                if not remaining_batters:
+                    st.warning("No remaining batters available in squad. This will end the innings if 10 wickets are down.")
+                    # allow confirming wicket without replacement
+                    if st.button("Confirm Wicket (No Replacement)"):
+                        state = process_ball(state, {"type":"wkt","val":0}, st.session_state["striker"], st.session_state["bowler"])
                         st.session_state["state"] = state
-                        save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
+                        save_state_to_db(m["id"], state)
                         st.experimental_rerun()
                 else:
-                    new_batter = st.text_input("New Batter Name", key=f"nb_wkt_{m['id']}")
-                    if st.button("Confirm Wicket (non-runout)"):
+                    next_batter = st.selectbox("Next Batter", remaining_batters, key=f"next_batter_{m['id']}")
+                    if st.button("Confirm Wicket and Add Batter"):
                         state = process_ball(state, {"type":"wkt","val":0}, st.session_state["striker"], st.session_state["bowler"])
-                        if new_batter and new_batter.strip():
-                            state = upgrade_to_pro_state(state, new_batter.strip(), st.session_state["non_striker"], st.session_state["bowler"])
-                            st.session_state["striker"] = new_batter.strip()
+                        # initialize new batter and set as striker (assuming striker was out)
+                        state = upgrade_to_pro_state(state, next_batter, st.session_state["non_striker"], st.session_state["bowler"])
+                        st.session_state["striker"] = next_batter
                         st.session_state["state"] = state
                         save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
                         st.experimental_rerun()
 
+            # Undo
             if cols2[4].button("Undo Last Ball"):
-                # Undo using history
                 state = pop_history(state)
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]})
@@ -436,16 +405,20 @@ elif choice == "Live Scoring":
                     with conn.session as s:
                         bowl_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": m.get("bowling_team")}).fetchall()
                     bowl_list = [p[0] for p in bowl_players]
-                    new_bowler = st.selectbox("New Bowler", bowl_list, key=f"new_bowler_{m['id']}")
+                    last_bowler = st.session_state.get("bowler")
+                    available_bowlers = [p for p in bowl_list if p != last_bowler]
+                    if not available_bowlers:
+                        st.warning("No other bowlers available; you may reselect the same bowler.")
+                        available_bowlers = bowl_list
+                    new_bowler = st.selectbox("New Bowler", available_bowlers, key=f"new_bowler_{m['id']}")
                     if st.form_submit_button("Confirm New Bowler"):
                         st.session_state["bowler"] = new_bowler
-                        # clear need_new_bowler flag
                         state["need_new_bowler"] = False
-                        # persist striker/non-striker/bowler and state
-                        save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]})
+                        st.session_state["state"] = state
+                        save_state_to_db(m["id"], state, {"bowler_id": st.session_state["bowler"], "striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
                         st.experimental_rerun()
 
-            # Swap Strike and End Over buttons (manual)
+            # Manual Swap / Force End Over
             col_a, col_b = st.columns(2)
             if col_a.button("Swap Strike"):
                 st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
@@ -490,13 +463,12 @@ elif choice == "Live Scoring":
             if wickets >= 10:
                 innings_end = True
             if innings_no == 2 and target and state["runs"] >= target:
-                # chase achieved -> match over
                 innings_end = True
 
             if innings_end:
                 result = finish_innings(m, state)
                 if result["next_phase"] == "second_innings":
-                    st.success(f"Innings 1 complete. Target set to {result['target']}. Starting second innings. Please set lineup for chasing team.")
+                    st.success(f"Innings 1 complete. Target set to {result['target']}. Please set lineup for chasing team.")
                     st.experimental_rerun()
                 elif result["next_phase"] == "match_completed":
                     st.success(f"Match completed. Winner: {result['winner']}")
