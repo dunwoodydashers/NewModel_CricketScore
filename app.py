@@ -304,16 +304,23 @@ if choice == "Schedule & Rosters":
         ta = st.selectbox("Team A", teams)
         tb = st.selectbox("Team B", teams)
         if st.button("Schedule Match") and ta and tb and ta != tb:
-            with conn.session as s:
-                s.execute(
-                    text(
-                        "INSERT INTO matches (team_a, team_b, status, innings_number) VALUES (:a, :b, 'Scheduled', 1)"
-                    ),
-                    {"a": ta, "b": tb},
-                )
-                s.commit()
-            st.success("Match Scheduled!")
-            st.experimental_rerun()
+            sql = "INSERT INTO matches (team_a, team_b, status, innings_number) VALUES (:a, :b, 'Scheduled', 1)"
+            params = {"a": ta, "b": tb}
+            try:
+                with conn.session as s:
+                    s.execute(text(sql), params)
+                    s.commit()
+                st.success("Match Scheduled!")
+                st.experimental_rerun()
+            except Exception as e:
+        # Debug output - remove after fixing
+                st.error("Scheduling failed: " + str(e))
+                st.write("SQL:", sql)
+                st.write("Params:", params)
+        # Also print DB error details if available
+                import traceback
+                st.text(traceback.format_exc())
+
 
 # -------------------------
 # LIVE SCORING
