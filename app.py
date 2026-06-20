@@ -39,6 +39,34 @@ choice = st.sidebar.selectbox("Menu", menu)
 
 if choice == "Schedule & Rosters":
     # ... (Keep your existing Roster logic)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Manage Teams & Players")
+        t_name = st.text_input("New Team Name")
+        if st.button("Add Team") and t_name.strip():
+            with conn.session as s:
+                s.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name.strip()})
+                s.commit()
+            st.rerun()
+        
+        teams = get_teams()
+        sel_t = st.selectbox("Select Team", teams if teams else ["Add a team first"])
+        p_name = st.text_input("Player Name")
+        if st.button("Add Player") and p_name.strip():
+            with conn.session as s:
+                s.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name})
+                s.commit()
+            st.rerun()
+
+    with c2:
+        st.subheader("Schedule Match")
+        ta = st.selectbox("Team A", teams)
+        tb = st.selectbox("Team B", teams)
+        if st.button("Schedule Match") and ta and tb:
+            with conn.session as s:
+                s.execute(text("INSERT INTO matches (team_a, team_b, status) VALUES (:a, :b, 'Scheduled')"), {"a": ta, "b": tb})
+                s.commit()
+            st.success("Match Scheduled!"); st.rerun()
     pass 
 
 elif choice == "Live Scoring":
@@ -50,6 +78,69 @@ elif choice == "Live Scoring":
         st.info("No active matches found.")
     else:
         m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
+
+        if m['status'] == 'Scheduled':
+            with st.form("toss_form"):
+                overs = st.number_input("Total Overs", 1, 50, 20)
+                tw = st.radio("Toss Winner", [m['team_a'], m['team_b']])
+                td = st.radio("Decision", ["Bat", "Bowl"])
+                if st.form_submit_button("Start Match"):
+                    with conn.session as s:
+                        s.execute(text("UPDATE matches SET total_overs=:o, toss_winner=:tw, toss_decision=:td, status='Lineup' WHERE id=:id"), 
+                                  {"o": overs, "tw": tw, "td": td, "id": m['id']})
+                        s.commit()
+                    st.rerun()
+
+        # --- PHASE 2: LINEUP (Select Players) ---
+        elif m['status'] == 'Lineup':
+            if m['toss_decision'] == 'Bat':
+                batting_team, bowling_team = m['toss_winner'], (m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b'])
+            else:
+                bowling_team, batting_team = m['toss_winner'], (m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b'])
+
+            with conn.session as s:
+                batting_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": batting_team}).fetchall()
+                bowling_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": bowling_team}).fetchall()
+            
+            bat_list, bowl_list = [p[0] for p in batting_players], [p[0] for p in bowling_players]
+            
+            s1 = st.selectbox("Striker", bat_list)
+            s2 = st.selectbox("Non-Striker", [p for p in bat_list if p != s1])
+            b = st.selectbox("Bowler", bowl_list)
+            
+            if st.button("Start Ball-by-Ball"):
+                with conn.session as s:
+                    s.execute(text("""
+                        UPDATE matches 
+                        SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live', 
+                            batting_team=:bt, bowling_team=:bowlt, score_state=:ss 
+                        WHERE id=:id
+                    """), {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, 
+                           "ss": json.dumps({"runs":0, "wickets":0, "balls":0}), "id": m['id']})
+                    s.commit()
+                st.rerun()
+        def process_ball(state, action, striker, bowler):
+    # action example: {'type': 'run', 'val': 4} or {'type': 'wide', 'val': 1}
+    t = action['type']
+    v = action['val']
+    
+    if t == 'run':
+        state['runs'] += v
+        state['batting'][striker]['r'] += v
+        state['batting'][striker]['b'] += 1
+        state['bowling'][bowler]['r'] += v
+        state['bowling'][bowler]['b'] += 1
+        if v == 4: state['batting'][striker]['4s'] += 1
+        if v == 6: state['batting'][striker]['6s'] += 1
+    elif t == 'wkt':
+        state['wickets'] += 1
+        state['bowling'][bowler]['w'] += 1
+        state['balls'] += 1
+    elif t == 'wd':
+        state['runs'] += v
+        state['bowling'][bowler]['wd'] += 1
+    # Add extra logic (bye, lb, nb) here...
+    return state
         
         if m['status'] == 'Live':
             # Load State
@@ -62,6 +153,18 @@ elif choice == "Live Scoring":
             # --- ACTION GRID ---
             st.write("### Scoring Actions")
             cols = st.columns(6)
+            actions = [1, 2, 3, 4, 5, 6]
+            for i, val in enumerate(actions):
+                if cols[i].button(str(val)):
+                    state = process_ball(state, {'type': 'run', 'val': val}, m['striker_id'], m['bowler_id'])
+
+             # Extra Buttons
+            cols2 = st.columns(4)
+            if cols2[0].button("Wide"): ...
+            if cols2[1].button("Wicket"): ...
+            if cols2[2].button("Swap Strike"): 
+                # Logic to swap striker/non-striker IDs in database
+                ...
             
             # Helper to update DB
             def update_db(new_state):
