@@ -443,7 +443,7 @@ elif choice == "Live Scoring":
                         {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, "ss": json.dumps(initial_state), "id": m["id"]},
                     )
                     s.commit()
-                st.experimental_rerun()
+                safe_rerun()
 
         # --- LIVE ---
         elif m["status"] == "Live":
