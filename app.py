@@ -225,7 +225,7 @@ def finish_innings(m, state):
                 s.execute(text(sql), params)
                 s.commit()
         except Exception as e:
-            # temporary debug output while you fix the issue
+            # temporary debug output while you verify the fix
             st.error("Error finishing innings: " + str(e))
             st.write("SQL:", sql)
             st.write("Params:", params)
@@ -247,6 +247,8 @@ def finish_innings(m, state):
             st.error("Error completing match: " + str(e))
             raise
         return {"next_phase": "match_completed", "winner": winner}
+
+    
 # -------------------------
 # UI LAYOUT
 # -------------------------
