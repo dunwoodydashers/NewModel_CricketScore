@@ -23,6 +23,17 @@ def get_teams():
     except Exception:
         return []
 
+def safe_rerun():
+    """Call Streamlit rerun safely across Streamlit versions."""
+    if hasattr(st, "experimental_rerun"):
+        try:
+            st.experimental_rerun()
+            return
+        except Exception:
+            pass
+    # fallback soft refresh
+    st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
+
 
 def upgrade_to_pro_state(state, striker, non_striker, bowler):
     """Ensure canonical pro structure exists and initialize missing players/bowler."""
@@ -284,7 +295,8 @@ if choice == "Schedule & Rosters":
             with conn.session as s:
                 s.execute(text("INSERT INTO teams (name) VALUES (:n)"), {"n": t_name.strip()})
                 s.commit()
-            st.experimental_rerun()
+            safe_rerun()
+
 
         teams = get_teams()
         sel_t = st.selectbox("Select Team", teams if teams else ["Add a team first"])
@@ -296,7 +308,8 @@ if choice == "Schedule & Rosters":
                     {"t": sel_t, "p": p_name.strip()},
                 )
                 s.commit()
-            st.experimental_rerun()
+            safe_rerun()
+
 
     with c2:
         st.subheader("Schedule Match")
@@ -311,16 +324,8 @@ if choice == "Schedule & Rosters":
                     s.execute(text(sql), params)
                     s.commit()
                 st.success("Match Scheduled!")
-        # Safe rerun: only call if available, otherwise fall back to a harmless session_state toggle
-                if hasattr(st, "experimental_rerun"):
-                    try:
-                        st.experimental_rerun()
-                    except Exception:
-                # If it still fails for some reason, fall back to a soft refresh
-                        st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
-                else:
-            # Soft refresh fallback for environments without experimental_rerun
-                    st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
+                safe_rerun()
+
             except Exception as e:
                 st.error("Scheduling failed: " + str(e))
                 st.write("SQL:", sql)
@@ -482,20 +487,23 @@ elif choice == "Live Scoring":
                         state,
                         {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]},
                     )
-                    st.experimental_rerun()
+                    safe_rerun()
+
 
             cols2 = st.columns(5)
             if cols2[0].button("Wide"):
                 state = process_ball(state, {"type": "wd", "val": 1}, st.session_state["striker"], st.session_state["bowler"])
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state)
-                st.experimental_rerun()
+                safe_rerun()
+
 
             if cols2[1].button("No-ball"):
                 state = process_ball(state, {"type": "nb", "val": 1}, st.session_state["striker"], st.session_state["bowler"])
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state)
-                st.experimental_rerun()
+                safe_rerun()
+
 
             # Bye flow: show a small inline confirm
             if cols2[2].button("Bye"):
@@ -504,7 +512,8 @@ elif choice == "Live Scoring":
                     state = process_ball(state, {"type": "bye", "val": val}, st.session_state["striker"], st.session_state["bowler"])
                     st.session_state["state"] = state
                     save_state_to_db(m["id"], state)
-                    st.experimental_rerun()
+                    safe_rerun()
+
 
             # Wicket flow: show remaining batters dropdown when confirming wicket
             if cols2[3].button("Wicket"):
@@ -523,7 +532,8 @@ elif choice == "Live Scoring":
                         state = process_ball(state, {"type": "wkt", "val": 0}, st.session_state["striker"], st.session_state["bowler"])
                         st.session_state["state"] = state
                         save_state_to_db(m["id"], state)
-                        st.experimental_rerun()
+                        safe_rerun()
+
                 else:
                     next_batter = st.selectbox("Next Batter", remaining_batters, key=f"next_batter_{m['id']}")
                     if st.button("Confirm Wicket and Add Batter"):
@@ -533,14 +543,16 @@ elif choice == "Live Scoring":
                         st.session_state["striker"] = next_batter
                         st.session_state["state"] = state
                         save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
-                        st.experimental_rerun()
+                        safe_rerun()
+
 
             # Undo
             if cols2[4].button("Undo Last Ball"):
                 state = pop_history(state)
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]})
-                st.experimental_rerun()
+                safe_rerun()
+
 
             # If over ended automatically, prompt for new bowler
             if state.get("need_new_bowler"):
@@ -560,21 +572,24 @@ elif choice == "Live Scoring":
                         state["need_new_bowler"] = False
                         st.session_state["state"] = state
                         save_state_to_db(m["id"], state, {"bowler_id": st.session_state["bowler"], "striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
-                        st.experimental_rerun()
+                        safe_rerun()
+
 
             # Manual Swap / Force End Over
             col_a, col_b = st.columns(2)
             if col_a.button("Swap Strike"):
                 st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
                 save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
-                st.experimental_rerun()
+                safe_rerun()
+
 
             if col_b.button("End Over (force)"):
                 st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
                 state["need_new_bowler"] = True
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"]})
-                st.experimental_rerun()
+                safe_rerun()
+
 
             # Scorecards
             st.write("### Batting Scorecard")
@@ -613,7 +628,9 @@ elif choice == "Live Scoring":
                 result = finish_innings(m, state)
                 if result["next_phase"] == "second_innings":
                     st.success(f"Innings 1 complete. Target set to {result['target']}. Please set lineup for chasing team.")
-                    st.experimental_rerun()
+                    safe_rerun()
+
                 elif result["next_phase"] == "match_completed":
                     st.success(f"Match completed. Winner: {result['winner']}")
-                    st.experimental_rerun()
+                    safe_rerun()
+
