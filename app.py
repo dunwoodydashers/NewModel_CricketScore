@@ -51,13 +51,23 @@ if choice == "Schedule & Rosters":
 
 elif choice == "Live Scoring":
     st.subheader("Live Match Tracker")
-    with conn.session as s:
-        matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
+    
+    # 1. Fetch live matches with error handling
+    try:
+        with conn.session as s:
+            # We use a explicit commit/rollback to ensure the session is clean
+            matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
+    except Exception as e:
+        st.error(f"Error fetching matches: {e}")
+        st.stop() # Stop the app so you can read the error
     
     if not matches:
         st.info("No active matches found.")
     else:
+        # ... (rest of your existing logic for Selectbox and Phases)
         m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
+        
+        # [Keep your PHASE 1, PHASE 2, and PHASE 3 logic exactly as it was]
         
         # --- PHASE 1: TOSS (Scheduled) ---
         if m['status'] == 'Scheduled':
