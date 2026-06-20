@@ -360,15 +360,42 @@ elif choice == "Live Scoring":
                     else:
                         bowling_team = tw
                         batting_team = m["team_a"] if tw == m["team_b"] else m["team_b"]
+
+                sql = """
+                    UPDATE matches
+                    SET total_overs = :o,
+                        toss_winner = :tw,
+                        toss_decision = :td,
+                        status = 'Lineup',
+                        batting_team = :bt,
+                        bowling_team = :bowlt
+                    WHERE id = :id
+                """
+                params = {"o": overs, "tw": tw, "td": td, "bt": batting_team, "bowlt": bowling_team, "id": m["id"]}
+
+                try:
                     with conn.session as s:
-                        s.execute(
-                            text(
-                                "UPDATE matches SET total_overs=:o, toss_winner=:tw, toss_decision=:td, status='Lineup', batting_team=:bt, bowling_team=:bowlt WHERE id=:id"
-                            ),
-                            {"o": overs, "tw": tw, "td": td, "bt": batting_team, "bowlt": bowling_team, "id": m["id"]},
-                        )
+                        s.execute(text(sql), params)
                         s.commit()
-                    st.experimental_rerun()
+                    st.success("Match prepared — go to Lineup")
+
+        # Safe rerun: call experimental_rerun only if available; otherwise toggle a session flag
+                    if hasattr(st, "experimental_rerun"):
+                        try:
+                            st.experimental_rerun()
+                        except Exception:
+                            st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
+                    else:
+                        st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
+
+                except Exception as e:
+                    st.error("Failed to start match: " + str(e))
+                    st.write("SQL:", sql)
+                    st.write("Params:", params)
+                    import traceback
+                    st.text(traceback.format_exc())
+
+               
 
         # --- LINEUP ---
         elif m["status"] == "Lineup":
