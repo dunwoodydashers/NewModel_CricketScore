@@ -9,7 +9,7 @@ conn = st.connection("supabase", type="sql", connect_args={"sslmode": "require"}
 st.set_page_config(page_title="Pro Cricket Scorer", layout="wide")
 st.title("🏏 Pro Cricket Scoring System")
 
-# --- 2. HELPER FUNCTIONS ---
+# --- 2. HELPER FUNCTIONS (Moved to top level) ---
 def get_teams():
     try:
         with conn.session as s:
@@ -33,20 +33,20 @@ def upgrade_to_pro_state(state, striker, non_striker, bowler):
     return state
 
 def process_ball(state, action, striker, bowler):
+    """The Logic Brain: Updates stats based on action."""
     t, v = action['type'], action.get('val', 0)
     if t == 'run':
         state['runs'] += v
         state['batting'][striker]['r'] += v
         state['batting'][striker]['b'] += 1
         state['bowling'][bowler]['r'] += v
+        state['bowling'][bowler]['b'] += 1 # Tracking balls for Econ
         if v == 4: state['batting'][striker]['4s'] += 1
         if v == 6: state['batting'][striker]['6s'] += 1
     elif t == 'wkt':
         state['wickets'] += 1
         state['bowling'][bowler]['w'] += 1
-    elif t == 'wd':
-        state['runs'] += 1
-        state['bowling'][bowler]['wd'] += 1
+        state['balls'] += 1
     return state
 
 # --- 3. UI LAYOUT ---
@@ -54,7 +54,7 @@ menu = ["Schedule & Rosters", "Live Scoring"]
 choice = st.sidebar.selectbox("Menu", menu)
 
 if choice == "Schedule & Rosters":
-    # ... (Your existing scheduling code remains unchanged)
+    # (Keep your existing Schedule logic here)
     pass 
 
 elif choice == "Live Scoring":
@@ -82,7 +82,6 @@ elif choice == "Live Scoring":
 
         # --- PHASE 2: LINEUP ---
         elif m['status'] == 'Lineup':
-            # Logic to determine teams...
             bat_team = m['toss_winner'] if m['toss_decision'] == 'Bat' else (m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b'])
             bowl_team = m['team_a'] if bat_team == m['team_b'] else m['team_b']
             
@@ -97,19 +96,18 @@ elif choice == "Live Scoring":
             if st.button("Start Ball-by-Ball"):
                 with conn.session as s:
                     s.execute(text("UPDATE matches SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live', score_state=:ss WHERE id=:id"), 
-                              {"s1": s1, "s2": s2, "b": b, "ss": json.dumps({"runs":0}), "id": m['id']})
+                              {"s1": s1, "s2": s2, "b": b, "ss": json.dumps({"runs":0, "wickets":0, "balls":0}), "id": m['id']})
                     s.commit()
                 st.rerun()
 
         # --- PHASE 3: LIVE SCORING ---
         elif m['status'] == 'Live':
-            # Load State
             state = json.loads(m['score_state']) if isinstance(m['score_state'], str) else m['score_state']
             state = upgrade_to_pro_state(state, m['striker_id'], m['non_striker_id'], m['bowler_id'])
             
             st.metric("Total Score", f"{state['runs']}/{state['wickets']}")
             
-            # Action Buttons
+            # Action Grid
             cols = st.columns(6)
             for i in range(1, 7):
                 if cols[i-1].button(str(i)):
@@ -122,12 +120,13 @@ elif choice == "Live Scoring":
                 with conn.session as s:
                     s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
 
-            # --- DISPLAY TABLES ---
-            st.write("### Batting")
+            # --- DISPLAY PRO TABLES ---
+            st.write("### Batting Scorecard")
             bat_df = pd.DataFrame.from_dict(state['batting'], orient='index')
             bat_df['SR'] = (bat_df['r'] / bat_df['b'] * 100).fillna(0).round(2)
             st.table(bat_df)
 
-            st.write("### Bowling")
+            st.write("### Bowling Scorecard")
             bowl_df = pd.DataFrame.from_dict(state['bowling'], orient='index')
+            bowl_df['Econ'] = (bowl_df['r'] / (bowl_df['b']/6)).fillna(0).round(2)
             st.table(bowl_df)
