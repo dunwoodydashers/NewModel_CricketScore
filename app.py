@@ -23,6 +23,7 @@ def get_teams():
     except Exception:
         return []
 
+
 def upgrade_to_pro_state(state, striker, non_striker, bowler):
     """Ensure canonical pro structure exists and initialize missing players/bowler."""
     if state is None:
@@ -54,6 +55,7 @@ def upgrade_to_pro_state(state, striker, non_striker, bowler):
 
     return state
 
+
 def push_history(state):
     # store a deep copy of the state for undo (limit history length)
     h = deepcopy(state)
@@ -63,12 +65,14 @@ def push_history(state):
         state["history"].pop(0)
     return state
 
+
 def pop_history(state):
     if state.get("history"):
         prev = state["history"].pop()
         prev["history"] = state.get("history", [])
         return prev
     return state
+
 
 def process_ball(state, action, striker, bowler):
     """
@@ -87,19 +91,23 @@ def process_ball(state, action, striker, bowler):
         state["bowling"][bowler]["balls"] += 1
 
     free_hit = state.get("free_hit", False)
-    return_after = None
 
     if t == "run":
         state["runs"] += v
         legal_ball()
         state["batting"][striker]["runs"] += v
         state["batting"][striker]["balls"] += 1
-        if v == 4: state["batting"][striker]["4s"] += 1
-        if v == 6: state["batting"][striker]["6s"] += 1
+        if v == 4:
+            state["batting"][striker]["4s"] += 1
+        if v == 6:
+            state["batting"][striker]["6s"] += 1
         state["bowling"][bowler]["runs"] += v
         if v % 2 == 1:
             # rotate strike on odd runs
-            st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
+            st.session_state["striker"], st.session_state["non_striker"] = (
+                st.session_state["non_striker"],
+                st.session_state["striker"],
+            )
         if free_hit:
             state["free_hit"] = False
 
@@ -114,7 +122,6 @@ def process_ball(state, action, striker, bowler):
             legal_ball()
             state["bowling"][bowler]["wickets"] += 1
             state["bowling"][bowler]["runs"] += 0
-            return_after = "wicket"
 
     elif t == "runout":
         legal_ball()
@@ -123,11 +130,12 @@ def process_ball(state, action, striker, bowler):
         # credit runs to striker for simplicity
         state["batting"][striker]["runs"] += v
         state["batting"][striker]["balls"] += 1
-        if v == 4: state["batting"][striker]["4s"] += 1
-        if v == 6: state["batting"][striker]["6s"] += 1
+        if v == 4:
+            state["batting"][striker]["4s"] += 1
+        if v == 6:
+            state["batting"][striker]["6s"] += 1
         state["wickets"] += 1
         state["bowling"][bowler]["wickets"] += 1
-        return_after = "wicket"
 
     elif t == "wd":
         state["runs"] += v
@@ -152,11 +160,15 @@ def process_ball(state, action, striker, bowler):
     if state["balls"] > 0 and state["balls"] % 6 == 0:
         state["need_new_bowler"] = True
         # rotate strike at over end
-        st.session_state["striker"], st.session_state["non_striker"] = st.session_state["non_striker"], st.session_state["striker"]
+        st.session_state["striker"], st.session_state["non_striker"] = (
+            st.session_state["non_striker"],
+            st.session_state["striker"],
+        )
     else:
         state["need_new_bowler"] = False
 
     return state
+
 
 def save_state_to_db(match_id, state, m_updates=None):
     payload = {"ss": json.dumps(state), "id": match_id}
@@ -170,6 +182,7 @@ def save_state_to_db(match_id, state, m_updates=None):
         s.execute(text(f"UPDATE matches SET {set_sql} WHERE id = :id"), payload)
         s.commit()
 
+
 def load_state_from_db(m):
     ss = m.get("score_state")
     if not ss:
@@ -179,59 +192,60 @@ def load_state_from_db(m):
     except Exception:
         return None
 
+
 def finish_innings(m, state):
     innings = m.get("innings_number") or 1
     if innings == 1:
-    # compute target and prepare new empty state for next innings
-    target = int(state["runs"]) + 1
-    new_state = {
-        "runs": 0,
-        "wickets": 0,
-        "balls": 0,
-        "batting": {},
-        "bowling": {},
-        "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0},
-        "history": [],
-        "free_hit": False,
-        "need_new_bowler": False
-    }
+        # compute target and prepare new empty state for next innings
+        target = int(state["runs"]) + 1
+        new_state = {
+            "runs": 0,
+            "wickets": 0,
+            "balls": 0,
+            "batting": {},
+            "bowling": {},
+            "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0},
+            "history": [],
+            "free_hit": False,
+            "need_new_bowler": False,
+        }
 
-    batting_team = m.get("bowling_team")
-    bowling_team = m.get("batting_team")
+        batting_team = m.get("bowling_team")
+        bowling_team = m.get("batting_team")
 
-    sql = """
-        UPDATE matches
-        SET innings_number = :innings,
-            target = :target,
-            batting_team = :bt,
-            bowling_team = :bowlt,
-            striker_id = NULL,
-            non_striker_id = NULL,
-            bowler_id = NULL,
-            score_state = :ss
-        WHERE id = :id
-    """
-    params = {
-        "innings": 2,
-        "target": target,
-        "bt": batting_team,
-        "bowlt": bowling_team,
-        "ss": json.dumps(new_state),
-        "id": m["id"]
-    }
+        sql = """
+            UPDATE matches
+            SET innings_number = :innings,
+                target = :target,
+                batting_team = :bt,
+                bowling_team = :bowlt,
+                striker_id = NULL,
+                non_striker_id = NULL,
+                bowler_id = NULL,
+                score_state = :ss
+            WHERE id = :id
+        """
+        params = {
+            "innings": 2,
+            "target": target,
+            "bt": batting_team,
+            "bowlt": bowling_team,
+            "ss": json.dumps(new_state),
+            "id": m["id"],
+        }
 
-    try:
-        with conn.session as s:
-            s.execute(text(sql), params)
-            s.commit()
-    except Exception as e:
-        # temporary debug output while you verify the fix
-        st.error("Error finishing innings: " + str(e))
-        st.write("SQL:", sql)
-        st.write("Params:", params)
-        raise
+        try:
+            with conn.session as s:
+                s.execute(text(sql), params)
+                s.commit()
+        except Exception as e:
+            # temporary debug output while you verify the fix
+            st.error("Error finishing innings: " + str(e))
+            st.write("SQL:", sql)
+            st.write("Params:", params)
+            raise
 
-    return {"next_phase": "second_innings", "target": target}
+        return {"next_phase": "second_innings", "target": target}
 
     else:
         target = m.get("target", 0)
@@ -241,14 +255,17 @@ def finish_innings(m, state):
             winner = m.get("bowling_team")
         try:
             with conn.session as s:
-                s.execute(text("UPDATE matches SET status='Completed', winner=:w WHERE id=:id"), {"w": winner, "id": m["id"]})
+                s.execute(
+                    text("UPDATE matches SET status='Completed', winner=:w WHERE id=:id"),
+                    {"w": winner, "id": m["id"]},
+                )
                 s.commit()
         except Exception as e:
             st.error("Error completing match: " + str(e))
             raise
         return {"next_phase": "match_completed", "winner": winner}
 
-    
+
 # -------------------------
 # UI LAYOUT
 # -------------------------
@@ -274,7 +291,10 @@ if choice == "Schedule & Rosters":
         p_name = st.text_input("Player Name")
         if st.button("Add Player") and p_name.strip() and sel_t:
             with conn.session as s:
-                s.execute(text("INSERT INTO players (team_name, name) VALUES (:t, :p)"), {"t": sel_t, "p": p_name.strip()})
+                s.execute(
+                    text("INSERT INTO players (team_name, name) VALUES (:t, :p)"),
+                    {"t": sel_t, "p": p_name.strip()},
+                )
                 s.commit()
             st.experimental_rerun()
 
@@ -285,7 +305,12 @@ if choice == "Schedule & Rosters":
         tb = st.selectbox("Team B", teams)
         if st.button("Schedule Match") and ta and tb and ta != tb:
             with conn.session as s:
-                s.execute(text("INSERT INTO matches (team_a, team_b, status, innings_number) VALUES (:a, :b, 'Scheduled', 1)"), {"a": ta, "b": tb})
+                s.execute(
+                    text(
+                        "INSERT INTO matches (team_a, team_b, status, innings_number) VALUES (:a, :b, 'Scheduled', 1)"
+                    ),
+                    {"a": ta, "b": tb},
+                )
                 s.commit()
             st.success("Match Scheduled!")
             st.experimental_rerun()
@@ -301,7 +326,11 @@ elif choice == "Live Scoring":
     if not matches:
         st.info("No active matches found.")
     else:
-        m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} (Innings {x.get('innings_number',1)} - {x['status']})")
+        m = st.selectbox(
+            "Select Match",
+            matches,
+            format_func=lambda x: f"{x['team_a']} vs {x['team_b']} (Innings {x.get('innings_number',1)} - {x['status']})",
+        )
 
         # --- SCHEDULED: Toss ---
         if m["status"] == "Scheduled":
@@ -317,8 +346,12 @@ elif choice == "Live Scoring":
                         bowling_team = tw
                         batting_team = m["team_a"] if tw == m["team_b"] else m["team_b"]
                     with conn.session as s:
-                        s.execute(text("UPDATE matches SET total_overs=:o, toss_winner=:tw, toss_decision=:td, status='Lineup', batting_team=:bt, bowling_team=:bowlt WHERE id=:id"),
-                                  {"o": overs, "tw": tw, "td": td, "bt": batting_team, "bowlt": bowling_team, "id": m["id"]})
+                        s.execute(
+                            text(
+                                "UPDATE matches SET total_overs=:o, toss_winner=:tw, toss_decision=:td, status='Lineup', batting_team=:bt, bowling_team=:bowlt WHERE id=:id"
+                            ),
+                            {"o": overs, "tw": tw, "td": td, "bt": batting_team, "bowlt": bowling_team, "id": m["id"]},
+                        )
                         s.commit()
                     st.experimental_rerun()
 
@@ -338,15 +371,30 @@ elif choice == "Live Scoring":
             b = st.selectbox("Bowler", bowl_list)
 
             if st.button("Start Ball-by-Ball"):
-                initial_state = {"runs": 0, "wickets": 0, "balls": 0, "batting": {}, "bowling": {}, "extras": {"wd":0,"nb":0,"bye":0,"lb":0}, "history": [], "free_hit": False, "need_new_bowler": False}
+                initial_state = {
+                    "runs": 0,
+                    "wickets": 0,
+                    "balls": 0,
+                    "batting": {},
+                    "bowling": {},
+                    "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0},
+                    "history": [],
+                    "free_hit": False,
+                    "need_new_bowler": False,
+                }
                 initial_state = upgrade_to_pro_state(initial_state, s1, s2, b)
                 with conn.session as s:
-                    s.execute(text("""
+                    s.execute(
+                        text(
+                            """
                         UPDATE matches 
                         SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live', 
                             batting_team=:bt, bowling_team=:bowlt, score_state=:ss, innings_number=1
                         WHERE id=:id
-                    """), {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, "ss": json.dumps(initial_state), "id": m["id"]})
+                    """
+                        ),
+                        {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, "ss": json.dumps(initial_state), "id": m["id"]},
+                    )
                     s.commit()
                 st.experimental_rerun()
 
@@ -363,7 +411,12 @@ elif choice == "Live Scoring":
                 st.session_state["total_overs"] = m.get("total_overs") or 0
                 st.session_state["innings_number"] = m.get("innings_number") or 1
 
-            state = upgrade_to_pro_state(st.session_state.get("state"), st.session_state["striker"], st.session_state["non_striker"], st.session_state["bowler"])
+            state = upgrade_to_pro_state(
+                st.session_state.get("state"),
+                st.session_state["striker"],
+                st.session_state["non_striker"],
+                st.session_state["bowler"],
+            )
 
             # Dashboard
             overs = state["balls"] // 6
@@ -378,22 +431,26 @@ elif choice == "Live Scoring":
             # Action grid
             st.write("### Scoring Actions")
             cols = st.columns(6)
-            for i, val in enumerate([1,2,3,4,5,6]):
+            for i, val in enumerate([1, 2, 3, 4, 5, 6]):
                 if cols[i].button(str(val)):
-                    state = process_ball(state, {"type":"run","val":val}, st.session_state["striker"], st.session_state["bowler"])
+                    state = process_ball(state, {"type": "run", "val": val}, st.session_state["striker"], st.session_state["bowler"])
                     st.session_state["state"] = state
-                    save_state_to_db(m["id"], state, {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]})
+                    save_state_to_db(
+                        m["id"],
+                        state,
+                        {"striker_id": st.session_state["striker"], "non_striker_id": st.session_state["non_striker"], "bowler_id": st.session_state["bowler"]},
+                    )
                     st.experimental_rerun()
 
             cols2 = st.columns(5)
             if cols2[0].button("Wide"):
-                state = process_ball(state, {"type":"wd","val":1}, st.session_state["striker"], st.session_state["bowler"])
+                state = process_ball(state, {"type": "wd", "val": 1}, st.session_state["striker"], st.session_state["bowler"])
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state)
                 st.experimental_rerun()
 
             if cols2[1].button("No-ball"):
-                state = process_ball(state, {"type":"nb","val":1}, st.session_state["striker"], st.session_state["bowler"])
+                state = process_ball(state, {"type": "nb", "val": 1}, st.session_state["striker"], st.session_state["bowler"])
                 st.session_state["state"] = state
                 save_state_to_db(m["id"], state)
                 st.experimental_rerun()
@@ -402,7 +459,7 @@ elif choice == "Live Scoring":
             if cols2[2].button("Bye"):
                 val = st.number_input("Bye runs", min_value=0, max_value=6, value=0, key=f"bye_{m['id']}")
                 if st.button("Confirm Bye", key=f"confirm_bye_{m['id']}"):
-                    state = process_ball(state, {"type":"bye","val":val}, st.session_state["striker"], st.session_state["bowler"])
+                    state = process_ball(state, {"type": "bye", "val": val}, st.session_state["striker"], st.session_state["bowler"])
                     st.session_state["state"] = state
                     save_state_to_db(m["id"], state)
                     st.experimental_rerun()
@@ -421,14 +478,14 @@ elif choice == "Live Scoring":
                     st.warning("No remaining batters available in squad. This will end the innings if 10 wickets are down.")
                     # allow confirming wicket without replacement
                     if st.button("Confirm Wicket (No Replacement)"):
-                        state = process_ball(state, {"type":"wkt","val":0}, st.session_state["striker"], st.session_state["bowler"])
+                        state = process_ball(state, {"type": "wkt", "val": 0}, st.session_state["striker"], st.session_state["bowler"])
                         st.session_state["state"] = state
                         save_state_to_db(m["id"], state)
                         st.experimental_rerun()
                 else:
                     next_batter = st.selectbox("Next Batter", remaining_batters, key=f"next_batter_{m['id']}")
                     if st.button("Confirm Wicket and Add Batter"):
-                        state = process_ball(state, {"type":"wkt","val":0}, st.session_state["striker"], st.session_state["bowler"])
+                        state = process_ball(state, {"type": "wkt", "val": 0}, st.session_state["striker"], st.session_state["bowler"])
                         # initialize new batter and set as striker (assuming striker was out)
                         state = upgrade_to_pro_state(state, next_batter, st.session_state["non_striker"], st.session_state["bowler"])
                         st.session_state["striker"] = next_batter
