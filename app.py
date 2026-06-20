@@ -2,20 +2,38 @@ import streamlit as st
 import json
 from sqlalchemy import text
 
-# --- CONNECTION ---
+# --- 1. CONFIGURATION ---
 conn = st.connection("supabase", type="sql", connect_args={"sslmode": "require"})
 
 st.set_page_config(page_title="Pro Cricket Scorer", layout="wide")
 st.title("🏏 Pro Cricket Scoring System")
 
-# --- HELPER FUNCTIONS ---
+# --- 2. HELPER FUNCTIONS ---
 def get_teams():
     try:
         with conn.session as s:
             return [r[0] for r in s.execute(text("SELECT name FROM teams")).fetchall()]
     except: return []
 
-# --- UI ---
+def upgrade_to_pro_state(state, striker, non_striker, bowler):
+    """Migrates old scoring state to the Pro structure."""
+    if "batting" not in state:
+        return {
+            "runs": state.get("runs", 0),
+            "wickets": state.get("wickets", 0),
+            "balls": state.get("balls", 0),
+            "last_6_balls": [],
+            "batting": {
+                striker: {"runs": 0, "balls": 0},
+                non_striker: {"runs": 0, "balls": 0}
+            },
+            "bowling": {
+                bowler: {"runs": 0, "wickets": 0, "balls": 0}
+            }
+        }
+    return state
+
+# --- 3. UI LAYOUT ---
 menu = ["Schedule & Rosters", "Live Scoring"]
 choice = st.sidebar.selectbox("Menu", menu)
 
@@ -51,23 +69,13 @@ if choice == "Schedule & Rosters":
 
 elif choice == "Live Scoring":
     st.subheader("Live Match Tracker")
-    
-    # 1. Fetch live matches with error handling
-    try:
-        with conn.session as s:
-            # We use a explicit commit/rollback to ensure the session is clean
-            matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
-    except Exception as e:
-        st.error(f"Error fetching matches: {e}")
-        st.stop() # Stop the app so you can read the error
+    with conn.session as s:
+        matches = s.execute(text("SELECT * FROM matches WHERE status != 'Completed'")).mappings().all()
     
     if not matches:
         st.info("No active matches found.")
     else:
-        # ... (rest of your existing logic for Selectbox and Phases)
         m = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['team_a']} vs {x['team_b']} ({x['status']})")
-        
-        # [Keep your PHASE 1, PHASE 2, and PHASE 3 logic exactly as it was]
         
         # --- PHASE 1: TOSS (Scheduled) ---
         if m['status'] == 'Scheduled':
@@ -83,69 +91,63 @@ elif choice == "Live Scoring":
                     st.rerun()
 
         # --- PHASE 2: LINEUP (Select Players) ---
-        # --- PHASE 2: LINEUP (Select Players) ---
-        # --- PHASE 2: LINEUP (Select Players) ---
         elif m['status'] == 'Lineup':
-            # 1. Determine Batting vs Bowling Team
             if m['toss_decision'] == 'Bat':
-                batting_team = m['toss_winner']
-                bowling_team = m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b']
-            else: # Decision was 'Bowl'
-                bowling_team = m['toss_winner']
-                batting_team = m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b']
+                batting_team, bowling_team = m['toss_winner'], (m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b'])
+            else:
+                bowling_team, batting_team = m['toss_winner'], (m['team_a'] if m['toss_winner'] == m['team_b'] else m['team_b'])
 
-            st.info(f"🏆 {m['toss_winner']} won the toss and chose to {m['toss_decision']}!")
-            st.subheader("Select Openers & Bowler")
-
-            # 2. Fetch players
             with conn.session as s:
                 batting_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": batting_team}).fetchall()
                 bowling_players = s.execute(text("SELECT name FROM players WHERE team_name = :t"), {"t": bowling_team}).fetchall()
             
-            bat_list = [p[0] for p in batting_players]
-            bowl_list = [p[0] for p in bowling_players]
+            bat_list, bowl_list = [p[0] for p in batting_players], [p[0] for p in bowling_players]
             
-            if len(bat_list) < 2:
-                st.error(f"Need at least 2 players for {batting_team} to select openers.")
-                st.stop()
-            
-            # 3. Dynamic Selection Logic
-            s1 = st.selectbox("Striker (Batting Team: " + batting_team + ")", bat_list)
-            
-            # Create a list for Non-Striker that EXCLUDES the selected Striker
-            non_striker_options = [p for p in bat_list if p != s1]
-            s2 = st.selectbox("Non-Striker (Batting Team: " + batting_team + ")", non_striker_options)
-            
-            b = st.selectbox("Bowler (Bowling Team: " + bowling_team + ")", bowl_list)
+            s1 = st.selectbox("Striker", bat_list)
+            s2 = st.selectbox("Non-Striker", [p for p in bat_list if p != s1])
+            b = st.selectbox("Bowler", bowl_list)
             
             if st.button("Start Ball-by-Ball"):
                 with conn.session as s:
                     s.execute(text("""
                         UPDATE matches 
                         SET striker_id=:s1, non_striker_id=:s2, bowler_id=:b, status='Live', 
-                            batting_team=:bt, bowling_team=:bowlt 
+                            batting_team=:bt, bowling_team=:bowlt, score_state=:ss 
                         WHERE id=:id
-                    """), 
-                    {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, "id": m['id']})
+                    """), {"s1": s1, "s2": s2, "b": b, "bt": batting_team, "bowlt": bowling_team, 
+                           "ss": json.dumps({"runs":0, "wickets":0, "balls":0}), "id": m['id']})
                     s.commit()
                 st.rerun()
 
-
-        #============================================
-
         # --- PHASE 3: LIVE SCORING ---
         elif m['status'] == 'Live':
-            st.write(f"**Striker:** {m['striker_id']} | **Non-Striker:** {m['non_striker_id']} | **Bowler:** {m['bowler_id']}")
-            
             score_val = m['score_state']
             state = score_val if isinstance(score_val, dict) else json.loads(score_val)
+            state = upgrade_to_pro_state(state, m['striker_id'], m['non_striker_id'], m['bowler_id'])
             
+            # Display Stats
             st.metric("Score", f"{state['runs']}/{state['wickets']}", f"Overs: {state['balls'] // 6}.{state['balls'] % 6}")
+            st.write(f"**Striker:** {m['striker_id']} ({state['batting'][m['striker_id']]['runs']}r) | "
+                     f"**Non-Striker:** {m['non_striker_id']} ({state['batting'][m['non_striker_id']]['runs']}r) | "
+                     f"**Bowler:** {m['bowler_id']} ({state['bowling'][m['bowler_id']]['runs']}r)")
             
-            b1, b2, b3, b4, b5 = st.columns(5)
+            # Action Buttons
+            col1, col2, col3, col4 = st.columns(4)
             with conn.session as s:
-                if b1.button("0 Run"): state['balls'] += 1; s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-                if b2.button("1 Run"): state['runs'] += 1; state['balls'] += 1; s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-                if b3.button("4 Runs"): state['runs'] += 4; state['balls'] += 1; s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-                if b4.button("Wicket"): state['wickets'] += 1; state['balls'] += 1; s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-                if b5.button("End Match"): s.execute(text("UPDATE matches SET status='Completed' WHERE id=:id"), {"id": m['id']}); s.commit(); st.rerun()
+                if col1.button("0 Run"):
+                    state['balls'] += 1; state['bowling'][m['bowler_id']]['balls'] += 1
+                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
+                if col2.button("1 Run"):
+                    state['runs'] += 1; state['balls'] += 1
+                    state['batting'][m['striker_id']]['runs'] += 1; state['batting'][m['striker_id']]['balls'] += 1
+                    state['bowling'][m['bowler_id']]['runs'] += 1; state['bowling'][m['bowler_id']]['balls'] += 1
+                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
+                if col3.button("4 Runs"):
+                    state['runs'] += 4; state['balls'] += 1
+                    state['batting'][m['striker_id']]['runs'] += 4; state['batting'][m['striker_id']]['balls'] += 1
+                    state['bowling'][m['bowler_id']]['runs'] += 4; state['bowling'][m['bowler_id']]['balls'] += 1
+                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
+                if col4.button("Wicket"):
+                    state['wickets'] += 1; state['balls'] += 1
+                    state['bowling'][m['bowler_id']]['wickets'] += 1; state['bowling'][m['bowler_id']]['balls'] += 1
+                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
