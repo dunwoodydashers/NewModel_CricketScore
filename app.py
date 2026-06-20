@@ -90,23 +90,25 @@ elif choice == "Live Scoring":
 
             # --- SCORECARDS ---
             # --- PRO SCORECARD ---
-            # --- PRO SCORECARD ---
             st.write("### Batting Scorecard")
             bat_df = pd.DataFrame.from_dict(state['batting'], orient='index')
             
-            # 1. Rename columns for display
-            bat_df = bat_df.rename(columns={'r': 'Runs', 'b': 'Balls', '4s': '4s', '6s': '6s'})
+            # Normalize column names: If keys are 'runs'/'balls', map them to 'r'/'b'
+            if 'runs' in bat_df.columns: bat_df = bat_df.rename(columns={'runs': 'r'})
+            if 'balls' in bat_df.columns: bat_df = bat_df.rename(columns={'balls': 'b'})
             
-            # 2. Calculate SR safely
-            if 'Balls' in bat_df.columns:
-                bat_df['SR'] = (bat_df['Runs'] / bat_df['Balls'] * 100).fillna(0).round(2)
-            
-            st.table(bat_df)
+            # Ensure columns exist before calculating
+            if 'r' in bat_df.columns and 'b' in bat_df.columns:
+                bat_df['SR'] = (bat_df['r'] / bat_df['b'] * 100).fillna(0).round(2)
+                st.table(bat_df)
+            else:
+                st.write("Stats data not yet formatted correctly.")
             
             st.write("### Bowling Scorecard")
             bowl_df = pd.DataFrame.from_dict(state['bowling'], orient='index')
             
-            # 3. Rename columns for display
-            bowl_df = bowl_df.rename(columns={'r': 'Runs', 'b': 'Balls', 'w': 'Wickets', 'wd': 'Wides'})
+            # Normalize column names for Bowler
+            if 'runs' in bowl_df.columns: bowl_df = bowl_df.rename(columns={'runs': 'r'})
+            if 'balls' in bowl_df.columns: bowl_df = bowl_df.rename(columns={'balls': 'b'})
             
             st.table(bowl_df)
