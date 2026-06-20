@@ -197,55 +197,55 @@ def finish_innings(m, state):
     innings = m.get("innings_number") or 1
     if innings == 1:
     # compute target and prepare new empty state for next innings
-    target = int(state["runs"]) + 1
-    new_state = {
-        "runs": 0,
-        "wickets": 0,
-        "balls": 0,
-        "batting": {},
-        "bowling": {},
-        "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0},
-        "history": [],
-        "free_hit": False,
-        "need_new_bowler": False,
-    }
+        target = int(state["runs"]) + 1
+        new_state = {
+            "runs": 0,
+            "wickets": 0,
+            "balls": 0,
+            "batting": {},
+            "bowling": {},
+            "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0},
+            "history": [],
+            "free_hit": False,
+            "need_new_bowler": False,
+        }
 
-    batting_team = m.get("bowling_team")
-    bowling_team = m.get("batting_team")
+        batting_team = m.get("bowling_team")
+        bowling_team = m.get("batting_team")
 
-    sql = """
-        UPDATE matches
-        SET innings_number = :innings,
-            target = :target,
-            batting_team = :bt,
-            bowling_team = :bowlt,
-            striker_id = NULL,
-            non_striker_id = NULL,
-            bowler_id = NULL,
-            score_state = :ss
-        WHERE id = :id
-    """
-    params = {
-        "innings": 2,
-        "target": target,
-        "bt": batting_team,
-        "bowlt": bowling_team,
-        "ss": json.dumps(new_state),
-        "id": m["id"],
-    }
+        sql = """
+            UPDATE matches
+            SET innings_number = :innings,
+                target = :target,
+                batting_team = :bt,
+                bowling_team = :bowlt,
+                striker_id = NULL,
+                non_striker_id = NULL,
+                bowler_id = NULL,
+                score_state = :ss
+            WHERE id = :id
+        """
+        params = {
+            "innings": 2,
+            "target": target,
+            "bt": batting_team,
+            "bowlt": bowling_team,
+            "ss": json.dumps(new_state),
+            "id": m["id"],
+        }
 
-    try:
-        with conn.session as s:
-            s.execute(text(sql), params)
-            s.commit()
-    except Exception as e:
+        try:
+            with conn.session as s:
+                s.execute(text(sql), params)
+                s.commit()
+        except Exception as e:
         # temporary debug output while you verify the fix
-        st.error("Error finishing innings: " + str(e))
-        st.write("SQL:", sql)
-        st.write("Params:", params)
-        raise
+            st.error("Error finishing innings: " + str(e))
+            st.write("SQL:", sql)
+            st.write("Params:", params)
+            raise
 
-    return {"next_phase": "second_innings", "target": target}
+        return {"next_phase": "second_innings", "target": target}
 
     else:
         target = m.get("target", 0)
