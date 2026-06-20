@@ -16,12 +16,15 @@ def get_teams():
     except: return []
 
 def upgrade_to_pro_state(state, striker, non_striker, bowler):
-    """Upgrades state to support Extras and full history."""
-    if "extras" not in state:
-        state.update({
-            "extras": {"wides": 0, "noballs": 0, "byes": 0, "legbyes": 0},
-            "last_balls": []
-        })
+    """Initializes/Upgrades state to support full professional stats."""
+    if "batting" not in state:
+        state = {
+            "runs": 0, "wickets": 0, "balls": 0,
+            "batting": {striker: {"r": 0, "b": 0, "4s": 0, "6s": 0}, non_striker: {"r": 0, "b": 0, "4s": 0, "6s": 0}},
+            "bowling": {bowler: {"o": 0, "r": 0, "w": 0, "wd": 0, "nb": 0}},
+            "extras": {"wd": 0, "nb": 0, "bye": 0, "lb": 0}
+        }
+    return state
     # Ensure batting/bowling structures exist
     if "batting" not in state:
         state["batting"] = {striker: {"runs": 0, "balls": 0}, non_striker: {"runs": 0, "balls": 0}}
@@ -113,43 +116,65 @@ elif choice == "Live Scoring":
                            "ss": json.dumps({"runs":0, "wickets":0, "balls":0}), "id": m['id']})
                     s.commit()
                 st.rerun()
-
+        def process_ball(state, action, striker, bowler):
+    # action example: {'type': 'run', 'val': 4} or {'type': 'wide', 'val': 1}
+    t = action['type']
+    v = action['val']
+    
+    if t == 'run':
+        state['runs'] += v
+        state['batting'][striker]['r'] += v
+        state['batting'][striker]['b'] += 1
+        state['bowling'][bowler]['r'] += v
+        state['bowling'][bowler]['b'] += 1
+        if v == 4: state['batting'][striker]['4s'] += 1
+        if v == 6: state['batting'][striker]['6s'] += 1
+    elif t == 'wkt':
+        state['wickets'] += 1
+        state['bowling'][bowler]['w'] += 1
+        state['balls'] += 1
+    elif t == 'wd':
+        state['runs'] += v
+        state['bowling'][bowler]['wd'] += 1
+    # Add extra logic (bye, lb, nb) here...
+    return state
         # --- PHASE 3: LIVE SCORING ---
         # --- PHASE 3: PRO SCORING INTERFACE ---
         elif m['status'] == 'Live':
-            # 1. Load State
-            score_val = m['score_state']
-            state = json.loads(score_val) if isinstance(score_val, str) else score_val
             state = upgrade_to_pro_state(state, m['striker_id'], m['non_striker_id'], m['bowler_id'])
-
-            # 2. Scoreboard Header
-            st.metric("Total Score", f"{state['runs']}/{state['wickets']}", f"Overs: {state['balls'] // 6}.{state['balls'] % 6}")
             
-            # 3. Action Grid (The "Scoresheet" Buttons)
+            # --- DASHBOARD ---
+            st.metric("Score", f"{state['runs']}/{state['wickets']}", f"Overs: {state['balls'] // 6}.{state['balls'] % 6}")
+            
+            # --- ACTION GRID ---
             st.write("### Scoring Actions")
-            col1, col2, col3, col4 = st.columns(4)
+            cols = st.columns(6)
+            actions = [1, 2, 3, 4, 5, 6]
+            for i, val in enumerate(actions):
+                if cols[i].button(str(val)):
+                    state = process_ball(state, {'type': 'run', 'val': val}, m['striker_id'], m['bowler_id'])
+                    # Save and rerun...
             
-            with conn.session as s:
-                # Standard Runs
-                if col1.button("0 Run"): 
-                    state['balls'] += 1; state['bowling'][m['bowler_id']]['balls'] += 1
-                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-                
-                if col2.button("1 Run"):
-                    state['runs'] += 1; state['balls'] += 1; state['batting'][m['striker_id']]['runs'] += 1
-                    state['batting'][m['striker_id']]['balls'] += 1; state['bowling'][m['bowler_id']]['runs'] += 1
-                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
+            # Extra Buttons
+            cols2 = st.columns(4)
+            if cols2[0].button("Wide"): ...
+            if cols2[1].button("Wicket"): ...
+            if cols2[2].button("Swap Strike"): 
+                # Logic to swap striker/non-striker IDs in database
+                ...
 
-                # Extras Section
-                if col3.button("Wide"):
-                    state['runs'] += 1; state['extras']['wides'] += 1
-                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-
-                if col4.button("Wicket", type="primary"):
-                    state['wickets'] += 1; state['balls'] += 1
-                    state['bowling'][m['bowler_id']]['wickets'] += 1
-                    s.execute(text("UPDATE matches SET score_state=:s WHERE id=:id"), {"s": json.dumps(state), "id": m['id']}); s.commit(); st.rerun()
-            # 4. Pro Scorecard View
+            # --- PRO SCORECARD ---
+            st.write("### Batting Scorecard")
+            import pandas as pd
+            bat_df = pd.DataFrame.from_dict(state['batting'], orient='index')
+            bat_df['SR'] = (bat_df['r'] / bat_df['b'] * 100).fillna(0).round(2)
+            st.dataframe(bat_df)
+            
+            st.write("### Bowling Scorecard")
+            bowl_df = pd.DataFrame.from_dict(state['bowling'], orient='index')
+            bowl_df['Econ'] = (bowl_df['r'] / (bowl_df['b']/6)).fillna(0).round(2)
+            st.dataframe(bowl_df)
+# 4. Pro Scorecard View
             st.write("---")
             col_a, col_b = st.columns(2)
             
